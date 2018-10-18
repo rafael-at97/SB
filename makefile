@@ -9,6 +9,8 @@ files.o: files.cpp files.h
 	
 scanner.o: scanner.cpp scanner.h
 	g++ -Wall -ansi scanner.cpp -c -o scanner.o	
-	
+
+.PHONY: clean
+
 clean:		
-	rm -f *.o	
+	rm -f *.o
