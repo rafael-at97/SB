@@ -10,7 +10,7 @@ using namespace std;
  
 // Name self-explanatory
 bool is_valid(char c){
-	 return ((c == ' ' || c == '\n' || c== '\t') ? 0 : 1);
+	 return (isdigit(c) || isalpha(c) || (c == '_'));
 }
 
 // Name self-explanatory
@@ -27,21 +27,21 @@ string upper(string str){
 // Get tokens from source file
 string get_token(ifstream &file){
 	char c = ' ';
-	string token;
+	string token = "";
 	
+	// While the char is not valid, keep reading
 	while(!is_valid(c) && !file.eof()){
 		file.get(c);
 		
 		// Deals with comments, read until next line
 		if(c==';'){
 			while(c!='\n' && !file.eof())
-				file.get(c);
-			// Read once more, avoid 'c' maintaining '\n' value
-			file.get(c);	
+				file.get(c);	
 		};
 	}
 	
-	while(!file.eof() && c!=' ' && c!='\n' && c!='\t'){
+	// The past loop makes sure the char is a valid one, read and append until a not valid char is found
+	while(!file.eof() && is_valid(c)){
 		token.append(&c);
 		file.get(c);
 		
@@ -49,10 +49,14 @@ string get_token(ifstream &file){
 		if(c==';'){
 			while(c!='\n' && !file.eof())
 				file.get(c);
-			// Read once more, avoid 'c' maintaining '\n' value
-			file.get(c);
+			
 			break;	
-		};		
+		}
+		else if(c==':'){
+			// Token is a rotule definition, append the ':' symbol
+			token.append(&c);
+			break;
+		};
 		
 	};
 	

@@ -83,7 +83,9 @@ void assemble(ifstream &source){
 	while(!source.eof()){
 		// Get next token
 		token = get_token(source);
-	
+		
+		cout << token << endl; 
+		/*
 		// If there is a token
 		if(!token.empty()){
 			// Check if token is a instruction
@@ -117,6 +119,7 @@ void assemble(ifstream &source){
 				};
 			};
 		};
+		*/
 	};
 
 }

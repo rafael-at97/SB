@@ -1,5 +1,8 @@
+all: montador clean
+
 montador: main.o files.o scanner.o
 	g++ -Wall -ansi main.o files.o scanner.o -o montador	
+	
 
 main.o: trab1.cpp
 	g++ -Wall -ansi trab1.cpp -c -o main.o
