@@ -9,8 +9,8 @@
 using namespace std; 
  
 // Name self-explanatory
-bool is_valid(char c){
-	 return (isdigit(c) || isalpha(c) || (c == '_'));
+bool is_ignore(char c){
+	 return (c=='\n' || c=='\t' || c == ' ');
 }
 
 // Name self-explanatory
@@ -30,7 +30,7 @@ string get_token(ifstream &file){
 	string token = "";
 	
 	// While the char is space or tab or space, keep reading
-	while((c=='\n' || c=='\t' || c==' ') && !file.eof()){
+	while(is_ignore(c) && !file.eof()){
 		file.get(c);
 		
 		// Deals with comments, read until next line
@@ -40,9 +40,8 @@ string get_token(ifstream &file){
 		};
 	}
 	
-	// MUST CHANGE THIS TO READ EVERY CHAR
 	// The past loop makes sure the char is a valid one, read and append until a not valid char is found
-	while(!file.eof() && is_valid(c)){
+	while(!file.eof() && !is_ignore(c)){
 		token.append(&c);
 		file.get(c);
 		
@@ -76,7 +75,7 @@ bool valid(string str){
 		if(!i && isdigit(str[i]))
 			return 0;
 			
-		if(!is_valid(str[i]))
+		if(!(isalpha(str[i]) || isdigit(str[i]) || str[i]=='_'))
 			return 0;
 	};
 	

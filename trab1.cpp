@@ -111,7 +111,13 @@ void assemble(ifstream &source){
 			}
 			else if(is_rotule_def(token)){
 				// If is rotule definition, the checking function already erases the ':'
-				cout << "Rotule definition: " << token << endl;
+				if(valid(token)){
+					// Token is valid
+					cout << "Valid rotule definition: " << token << endl;
+				}
+				else {
+					cout << "Invalid rotule definition: " << token << endl;
+				};
 			}
 			else {
 				// Assume it is a rotule
