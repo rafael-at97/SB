@@ -29,8 +29,8 @@ string get_token(ifstream &file){
 	char c = ' ';
 	string token = "";
 	
-	// While the char is not valid, keep reading
-	while(!is_valid(c) && !file.eof()){
+	// While the char is space or tab or space, keep reading
+	while((c=='\n' || c=='\t' || c==' ') && !file.eof()){
 		file.get(c);
 		
 		// Deals with comments, read until next line
@@ -40,6 +40,7 @@ string get_token(ifstream &file){
 		};
 	}
 	
+	// MUST CHANGE THIS TO READ EVERY CHAR
 	// The past loop makes sure the char is a valid one, read and append until a not valid char is found
 	while(!file.eof() && is_valid(c)){
 		token.append(&c);
@@ -60,13 +61,6 @@ string get_token(ifstream &file){
 		
 	};
 	
-	// If anything was inserted into the string
-	if(token.length()){
-		// Not sure if needed
-		c = '\0';
-		token.append(&c);	
-	};
-	
 	return token;
 }
 
@@ -82,7 +76,7 @@ bool valid(string str){
 		if(!i && isdigit(str[i]))
 			return 0;
 			
-		if(!isdigit(str[i]) && !isalpha(str[i]) && (str[i] != '_'))
+		if(!is_valid(str[i]))
 			return 0;
 	};
 	

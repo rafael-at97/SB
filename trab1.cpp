@@ -73,53 +73,57 @@ void fill_instruction_table(){
 	instructions.insert( pair<string, int>("STOP", 14) );	
 }
 
+bool is_instruction(string token){
+	// Using iterator to avoid using [] operator and inserting new values into the instructions map structure
+	map<string, int>::iterator map_it;
+	
+	map_it = instructions.find(upper(token));
+
+	if(map_it != instructions.end()){
+		// The token is a instruction
+		return 1;
+	}
+	else
+		return 0; 
+}
+
+bool is_rotule_def(string &token){
+	if(token[token.length() - 1] == ':'){
+		token = token.substr(0, token.length()-1);
+		return 1;
+	};
+	return 0;
+}
+
 // This function creates a sequence of the numerical code that represents the source code
 void assemble(ifstream &source){
 	string token;
-
-	// Using iterator to avoid using [] operator and inserting new values into the instructions map structure
-	map<string, int>::iterator map_it;
 
 	while(!source.eof()){
 		// Get next token
 		token = get_token(source);
 		
-		cout << token << endl; 
-		/*
 		// If there is a token
 		if(!token.empty()){
-			// Check if token is a instruction
-			map_it = instructions.find(upper(token));
-			
-			if(map_it != instructions.end()){
-				// The token is a instruction
-				//cout << map_it->second << endl;
-				
-				// Insert absolute value of opcode
-				code.push_back(map_it->second);
+			// Check if token is a instruction, rotule definition or none (assume rotule)
+			if(is_instruction(token)){
+				cout << "Instruction: " << token << endl;
+			}
+			else if(is_rotule_def(token)){
+				// If is rotule definition, the checking function already erases the ':'
+				cout << "Rotule definition: " << token << endl;
 			}
 			else {
-				//int rot = 0;
-				// Check if token represents a rotule
-				if(token[token.length() - 1] == ':'){
-					//rot = 1;
-					token = token.substr(0, token.length()-1);
-				};
-				
-				// Check if the token is valid, scanner -> lexical errors are detected here
+				// Assume it is a rotule
 				if(valid(token)){
-					cout << "valid token = " << token << endl;
-					
-					code.push_back(atoi(token.c_str()));
-					relatives.push_back((int)code.size()-1);
+					// Token is valid
+					cout << "Valid token: " << token << endl;
 				}
 				else {
-					// Not valid token, lexical error
-					cout << "invalid token = " << token << endl;
+					cout << "Invalid token: " << token << endl;
 				};
 			};
 		};
-		*/
 	};
 
 }
