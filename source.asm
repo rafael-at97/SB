@@ -1,5 +1,5 @@
-LOAD 8	; load first integer
-Add 6	; Test
-SuB	7 	; add
-N::::: SPACE
-Atrix
+LOAD N ; commaednasdkjketa
+AdD N ; sum n in the value
+N: SPACE
+SUB N;
+LOAD K

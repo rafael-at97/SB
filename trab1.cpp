@@ -31,12 +31,16 @@
  *
  * 	Current version:
  *		V0.0 - Assembler simply capable of reading input source code and translate mnemonics to opcode
- *			 - Implemented using single-pass algorithm to solve the forward-reference problem	
+ *			 - Implemented using single-pass algorithm to solve the forward-reference problem
+ *		V1.0 - Fully implements symbol table and solved forward-reference problem
+ *			 - Presents lexical and syntax errors	
+ *		V2.0 - Accept directives SPACE and CONST
  */ 
 
 #include<cstdlib>
 #include<iostream>
 #include<map>
+#include<set>
 #include<string>
 #include<fstream>
 #include<vector>
@@ -49,13 +53,22 @@ using namespace std;
 map<string, int> instructions;
 
 // Table of symbols
-map<string, int> symbols;
+/*			Example
+ *	Name | Value  | Defined
+ *    A  |    2   |    0
+ *    B  |    1   |    1 
+ *
+ */
+map<string, pair<int, bool> > symbols;
+
+// Directives table
+set<string> directives;
 
 // Vectors para codigos (opcode e espacos na memoria) e informacao de codigos relativos
 vector<int> code;
 vector<int> relatives;
 
-void fill_instruction_table(){
+void fill_instruction_and_directives_table(){
 	// Insertion of instructions in the table
 	instructions.insert( pair<string, int>("ADD", 1) );
 	instructions.insert( pair<string, int>("SUB", 2) );
@@ -71,6 +84,10 @@ void fill_instruction_table(){
 	instructions.insert( pair<string, int>("INPUT", 12) );
 	instructions.insert( pair<string, int>("OUTPUT", 13) );
 	instructions.insert( pair<string, int>("STOP", 14) );	
+
+	// Fill directives table
+	directives.insert("SPACE");
+	directives.insert("CONST");
 }
 
 bool is_instruction(string token){
@@ -87,7 +104,7 @@ bool is_instruction(string token){
 		return 0; 
 }
 
-bool is_rotule_def(string &token){
+bool is_label_def(string &token){
 	if(token[token.length() - 1] == ':'){
 		token = token.substr(0, token.length()-1);
 		return 1;
@@ -95,9 +112,52 @@ bool is_rotule_def(string &token){
 	return 0;
 }
 
+bool is_directive(string token){
+	set<string>::iterator set_it;
+	
+	set_it = directives.find(token);
+	
+	if(set_it != directives.end())
+		return 1;
+		
+	return 0;	
+}
+
+short int already_defined(string token){
+	// Using iterator to avoid using [] operator and inserting new values into the instructions map structure
+	map<string, pair<int, bool> >::iterator symbol_it;
+	
+	symbol_it = symbols.find(token);
+
+	if(symbol_it != symbols.end()){
+		// The token is a instruction
+		
+		// Return 0 or 1, depends if it was already defined
+		return (symbol_it->second).second;
+	}
+	else
+		return -1;
+}
+
+void recursive_definition(string token, int pos){
+	int _pos, tmp;
+	
+	_pos = symbols[token].first;
+	
+	do {
+		tmp = code[_pos];
+		code[_pos] = pos;
+		_pos = tmp;
+	} while(_pos!=-1);
+}
+
 // This function creates a sequence of the numerical code that represents the source code
 void assemble(ifstream &source){
-	string token;
+	string token, last_instruction="";
+	int pos = 0;
+	
+	bool flag_end = 0;	
+	short int cnt = 0;
 
 	while(!source.eof()){
 		// Get next token
@@ -105,28 +165,121 @@ void assemble(ifstream &source){
 		
 		// If there is a token
 		if(!token.empty()){
-			// Check if token is a instruction, rotule definition or none (assume rotule)
+			// Check if token is a instruction, label definition or none (assume label)
 			if(is_instruction(token)){
-				cout << "Instruction: " << token << endl;
-			}
-			else if(is_rotule_def(token)){
-				// If is rotule definition, the checking function already erases the ':'
-				if(valid(token)){
-					// Token is valid
-					cout << "Valid rotule definition: " << token << endl;
+			
+				if(cnt){
+					cout << "Error! Missing arguments for instruction " << last_instruction << "!" << endl;
+				};	
+
+				if(flag_end){
+					cout << "Error! Stop already detected, cannot handle any more instructions!!" << endl;
+				};
+				
+				token = upper(token);
+				
+				if(token == "STOP"){
+					flag_end = 1;
+					cnt = 0;
+				}
+				else if(token == "COPY"){
+					cnt = 2;
 				}
 				else {
-					cout << "Invalid rotule definition: " << token << endl;
+					cnt = 1;
+				};
+				
+				last_instruction = token;
+				
+				code.push_back(instructions[token]);
+				pos++;
+			}
+			else if(is_directive(token)){
+				token = upper(token);
+				
+				if(token == "SPACE"){
+					code.push_back(0);
+					pos++;
+				}
+				else if(token == "CONST"){
+					// Set a flag and wait for int argument
+				};
+			}
+			else if(is_label_def(token)){
+				// If is label definition, the checking function already erases the ':'
+				if(valid(token)){
+					// Token is valid
+					
+					if(cnt){
+						cout << "Error! Missing arguments for instruction " << last_instruction << "!" << endl;
+					};
+					
+					token = upper(token);
+					
+					short int ver = already_defined(token);
+					
+					// Already defined
+					if(ver == 1){
+						cout << ver << endl;
+						cout << symbols[token].first << endl;
+					}
+					else if(!ver){
+						// Already exists, but not defined
+						
+						recursive_definition(token, pos);
+						
+						// CHANGE THE FIRST VALUE TO THE POSITION IN THE CODE
+						symbols[token].first = pos;
+						
+						// Set as defined
+						symbols[token].second = 1;
+					}
+					else {
+						// -1, does not even exist!
+						
+						// CHANGE POSITION TO THE COUNTER IN THE CODE
+						symbols[token] = make_pair(pos, 1);
+					};
+					
+				}
+				else {
+					cout << "Invalid label definition: \"" << token << "\"!" << endl;
 				};
 			}
 			else {
-				// Assume it is a rotule
+				// Assume it is a label
 				if(valid(token)){
 					// Token is valid
-					cout << "Valid token: " << token << endl;
+					
+					if(!cnt){
+						// Save last instruction
+						cout << "Error! Too many arguments for instruction " << last_instruction << "!" << endl;
+					}
+					else {
+						token = upper(token);
+					
+						short int ver = already_defined(token); 	
+				
+						if(ver == 1){
+							code.push_back(symbols[token].first);
+						}
+						else if(!ver){
+							code.push_back(symbols[token].first);
+							symbols[token].first = pos;
+						}
+						else {
+							code.push_back(-1);
+							symbols[token] = make_pair(pos, 0);
+						};
+						
+						relatives.push_back(pos);
+						
+						cnt--;
+						pos++;
+					};
 				}
 				else {
-					cout << "Invalid token: " << token << endl;
+					cout << "Invalid token: \"" << token << "\"!" << endl;
 				};
 			};
 		};
@@ -172,7 +325,7 @@ int main(int argc, char **argv){
 		return 0;
 
 	// Fill the instruction table for future queries
-	fill_instruction_table();
+	fill_instruction_and_directives_table();
 
 	// Function that reads the input file and fills the 'code' and 'relative' vectors, most important function in the code
 	assemble(source);
