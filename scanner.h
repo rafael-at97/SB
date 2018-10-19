@@ -18,3 +18,9 @@ string get_token(ifstream &);
 
 // Check if token is a valid token
 bool valid(string);
+
+// Check if it is a number
+bool is_int(string);
+
+// Convert string to int
+int strtoi(string);

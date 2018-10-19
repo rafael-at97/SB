@@ -34,7 +34,8 @@
  *			 - Implemented using single-pass algorithm to solve the forward-reference problem
  *		V1.0 - Fully implements symbol table and solved forward-reference problem
  *			 - Presents lexical and syntax errors	
- *		V2.0 - Accept directives SPACE and CONST
+ *		V2.0 - Accept directives SPACE and CONST, as well as the arguments + and constant for SPACE
+ *			 - Trying to implement possibility of using (+) when calling labels, ex: ADD: N + 5
  */ 
 
 #include<cstdlib>
@@ -156,12 +157,13 @@ void assemble(ifstream &source){
 	string token, last_instruction="";
 	int pos = 0;
 	
-	bool flag_end = 0;	
+	bool flag_end = 0, flag_read = 1;	
 	short int cnt = 0;
 
 	while(!source.eof()){
-		// Get next token
-		token = get_token(source);
+		// Get next token if did not already when checking directives
+		if(flag_read)
+			token = get_token(source);
 		
 		// If there is a token
 		if(!token.empty()){
@@ -170,7 +172,7 @@ void assemble(ifstream &source){
 			
 				if(cnt){
 					cout << "Error! Missing arguments for instruction " << last_instruction << "!" << endl;
-				};	
+				};
 
 				if(flag_end){
 					cout << "Error! Stop already detected, cannot handle any more instructions!!" << endl;
@@ -195,14 +197,62 @@ void assemble(ifstream &source){
 				pos++;
 			}
 			else if(is_directive(token)){
+				if(cnt){
+					cout << "Error! Missing arguments for instruction " << last_instruction << "!" << endl;
+				};
+				
 				token = upper(token);
 				
 				if(token == "SPACE"){
-					code.push_back(0);
-					pos++;
+					// Get a new token and check if it is a plus sign (+)
+					token = get_token(source);
+					
+					if(token == "+"){
+						// The user wants to allocate more than a single memory space
+						// Get a new token and check if it is a number
+						
+						token = get_token(source);
+						
+						if(is_int(token)){
+							// Must insert strtoi(token) + 1 positions filled with 0 in the code
+							code.insert(code.end(), (strtoi(token)+1), 0);
+							pos += (strtoi(token)+1);
+						}
+						else {
+							// Not a number as expected
+							cout << "Could not resolve constant for SPACE directive!" << endl;
+							
+							// Tells the assembler not to read
+							flag_read = 0;
+							continue;
+						};
+					}
+					else {
+						// Allocates a single memory space
+						code.push_back(0);
+						pos++;
+						
+						// Tells the assembler not to overwrite the already written token
+						flag_read = 0;
+						continue;
+					};
 				}
 				else if(token == "CONST"){
-					// Set a flag and wait for int argument
+					// Get a new token and check if it is a numerical string
+					token = get_token(source);
+					
+					if(is_int(token)){
+						// Correct argument for directive, add data to the code and read next token normally on next loop
+						code.push_back(strtoi(token));
+						pos++;
+					}
+					else {
+						// Incorrect argument for directive, may be instruction, label definition or something else
+						// Set a flag so don't read another token and overwrite this one
+						cout << "Could not resolve constant for CONST directive!" << endl;
+						flag_read = 0;
+						continue;
+					};
 				};
 			}
 			else if(is_label_def(token)){
@@ -283,6 +333,8 @@ void assemble(ifstream &source){
 				};
 			};
 		};
+		// Reset some flags
+		flag_read = 1;
 	};
 
 }

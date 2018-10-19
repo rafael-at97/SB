@@ -81,3 +81,24 @@ bool valid(string str){
 	
 	return 1;
 }
+
+bool is_int(string str){
+	int x = str.length();
+	
+	for(int i=0;i<x;i++){
+		if(!isdigit(str[i]))
+			return 0;
+	};
+	return 1;
+}
+
+int strtoi(string str){
+	int x = str.length(), base = 1, sum=0;
+	
+	for(int i=x-1;i>=0;i--){
+		sum += (str[i]-'0')*base;
+		base*=10;
+	};
+	
+	return sum;
+}
