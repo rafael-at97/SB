@@ -84,18 +84,35 @@ bool valid(string str){
 
 bool is_int(string str){
 	int x = str.length();
-	
-	for(int i=0;i<x;i++){
+
+	for(int i=1;i<x;i++){
 		if(!isdigit(str[i]))
 			return 0;
 	};
+	
+	// Special case, user inserted sign
+	if(str[0]=='+' || str[0]=='-'){
+		if(x==1)			  // If length is only one, input has no number
+			return 0;
+	}		
+	else if(!isdigit(str[0])) // Last check, if it is not a digit	
+		return 0;
+	
 	return 1;
 }
 
 int strtoi(string str){
 	int x = str.length(), base = 1, sum=0;
-	
+
 	for(int i=x-1;i>=0;i--){
+		if(!i){
+			if(str[i] == '-'){
+				sum = -sum;
+				break;
+			}
+			else if(str[i] == '+')
+				break;	
+		};
 		sum += (str[i]-'0')*base;
 		base*=10;
 	};

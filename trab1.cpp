@@ -34,8 +34,13 @@
  *			 - Implemented using single-pass algorithm to solve the forward-reference problem
  *		V1.0 - Fully implements symbol table and solved forward-reference problem
  *			 - Presents lexical and syntax errors	
- *		V2.0 - Accept directives SPACE and CONST, as well as the arguments + and constant for SPACE
- *			 - Trying to implement possibility of using (+) when calling labels, ex: ADD: N + 5
+ *		V2.0 - Accept directives SPACE and CONST, as well as arguments
+ *		V2.1 - Accept/treat negative values for SPACE and CONST
+ *		V2.2 - Minor fixes on detecting number: a + or - by itself is not a number!
+ *		V2.3 - Trying to accept hexadecimal as number!
+ *  	V2.4 - Trying to implement possibility of using (+) when calling labels, ex: ADD: N + 5
+ *		V2.5 - Need to detect if a ',' is used between COPY instruction
+ *		V3.0 - Accept directives SECTION
  */ 
 
 #include<cstdlib>
@@ -204,35 +209,29 @@ void assemble(ifstream &source){
 				token = upper(token);
 				
 				if(token == "SPACE"){
-					// Get a new token and check if it is a plus sign (+)
+					// Get a new token and check if it is an argument
 					token = get_token(source);
 					
-					if(token == "+"){
-						// The user wants to allocate more than a single memory space
-						// Get a new token and check if it is a number
-						
-						token = get_token(source);
-						
-						if(is_int(token)){
-							// Must insert strtoi(token) + 1 positions filled with 0 in the code
-							code.insert(code.end(), (strtoi(token)+1), 0);
-							pos += (strtoi(token)+1);
+					if(is_int(token)){
+						// The user wants to feed an argument to SPACE
+						int value = strtoi(token);
+							
+						if(value>=0){
+							code.insert(code.end(), strtoi(token), 0);
+							pos += strtoi(token);
 						}
 						else {
-							// Not a number as expected
-							cout << "Could not resolve constant for SPACE directive!" << endl;
-							
-							// Tells the assembler not to read
-							flag_read = 0;
-							continue;
-						};
+							cout << "SPACE cannot allocate negative memory spaces! Allocating only one space instead." << endl;
+							code.push_back(0);
+							pos++;
+						};						
 					}
 					else {
 						// Allocates a single memory space
 						code.push_back(0);
 						pos++;
 						
-						// Tells the assembler not to overwrite the already written token
+						// Tells the assembler not to overwrite the already read token
 						flag_read = 0;
 						continue;
 					};
