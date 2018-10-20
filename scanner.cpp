@@ -4,6 +4,7 @@
 
 #include<string>
 #include<fstream>
+#include<cctype>
 #include"scanner.h" 
  
 using namespace std; 
@@ -17,8 +18,7 @@ bool is_ignore(char c){
 string upper(string str){
 	int i;
 	for(i=0;i<(int)str.length();i++){
-		if(str[i]>='a' && str[i]<='z')
-			str[i] = str[i] - 'a' + 'A';	
+		str[i] = toupper(str[i]);	
 	}
 	
 	return str;
