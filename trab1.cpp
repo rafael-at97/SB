@@ -38,8 +38,8 @@
  *		V2.1 - Accept/treat negative values for SPACE and CONST
  *		V2.2 - Minor fixes on detecting number: a + or - by itself is not a number!
  *	    V2.3 - Trying to accept hexadecimal as number!
- *  ->	V2.4 - Trying to implement possibility of using (+) when calling labels, ex: ADD: N + 5
- *		V2.5 - Need to detect if a ',' is used between COPY instruction
+ *  	V2.4 - Trying to implement possibility of using (+) when calling labels, ex: ADD: N + 5
+ *	->	V2.5 - Need to detect if a ',' is used between COPY instruction
  *		V2.6 - Cannot use certain instructions involving constants 
  *		V3.0 - Accept directives SECTION
  */
@@ -67,6 +67,9 @@ map<string, int> instructions;
  *
  */
 map<string, pair<int, bool> > symbols;
+
+// Table that helps deal with offsets
+map<int, int> offsets;
 
 // Directives table
 set<string> directives;
@@ -151,6 +154,28 @@ short int already_defined(string token){
 		return -1;
 }
 
+// Check if a position is in the offsets mapping data structure and returns the value of the offset
+int check_offset(int pos){
+	map<int, int>::iterator it;
+	
+	it = offsets.find(pos);
+	
+	if(it!=offsets.end()){
+		// If a result was found
+		int value = it->second;
+		
+		// Erases from the data structure, given that position was already used
+		offsets.erase(it);
+		
+		return value;
+	}
+	else {
+		return 0;
+	};
+	
+	return 0;
+}
+
 // Does a 'recursive' fill in the code vector of the positions of a previously unknown label
 void recursive_definition(string token, int pos){
 	int _pos, tmp;
@@ -164,6 +189,9 @@ void recursive_definition(string token, int pos){
 		
 		// Update the position in the code
 		code[_pos] = pos;
+		
+		// Check if it needs offsets
+		code[_pos] += check_offset(_pos);
 		
 		// 'Recursive' update of the position value
 		_pos = tmp;
@@ -291,7 +319,7 @@ short int check_problems(short int &cnt, bool *flags, string last_instruction, i
 void solve_label_def(string token, bool *flags, int pos){
 	token = upper(token);
 	
-	// 1: Exists and defined, 2: Exists but not defined, 0: Does not exist
+	// 1: Exists and defined, 0: Exists but not defined, -1: Does not exist
 	short int ver = already_defined(token);
 	
 	// Already defined
@@ -322,10 +350,10 @@ void solve_label_def(string token, bool *flags, int pos){
 }
 
 // Deals with labels
-void solve_label(string token, int pos, bool *flags){
+string solve_label(string token, int pos, bool *flags){
 	token = upper(token);
 
-	// 1: Exists and defined, 2: Exists but not defined, 0: Does not exist
+	// 1: Exists and defined, 0: Exists but not defined, -1: Does not exist
 	short int ver = already_defined(token); 
 
 	if(ver == 1){
@@ -348,10 +376,12 @@ void solve_label(string token, int pos, bool *flags){
 	
 	// Set a flag telling that a '+' might come next
 	flags[4] = 1;
+	
+	return token;
 }
 
 // Check if it is a number and if flags are raised
-bool is_argument(string token, bool *flags, int &pos){
+bool is_argument(string token, bool *flags, int &pos, string last_label){
 	
 	// First, make sure there are directives waiting for arguments
 	if(flags[1]){
@@ -424,12 +454,24 @@ bool is_argument(string token, bool *flags, int &pos){
 		if(is_decimal(token)){
 			int value = (int)strtol(token.c_str(), NULL, 10);
 			
-			// Inserts into the offset maping structure that the position needs an offset
-			cout << "Offset: " << value << endl;
+			// Checks if the label was already defined
+			short int ver = already_defined(last_label); 
 			
+			if(ver == 1){
+				// Means that the label was already defined, simply sum in the code the offset
+				code[pos-1] += value;
+			}
+			else {
+				// Inserts into the offset maping structure that the position needs an offset
+			
+				// pos-1 because a label increments the position 
+				offsets.insert( pair<int, int>(pos-1, value) );
+			
+			};
+
 			// Reset flag
 			flags[5] = 0;
-			
+
 			return 1;
 		};
 	}
@@ -439,7 +481,7 @@ bool is_argument(string token, bool *flags, int &pos){
 
 // This function creates a sequence of the numerical code that represents the source code
 void assemble(ifstream &source){
-	string token, last_instruction="";
+	string token, last_instruction="", last_label="";
 	int pos = 0;
 	
 	// 0 -> flag_end
@@ -507,21 +549,21 @@ void assemble(ifstream &source){
 	
 					// Check most problems
 					if(!check_problems(cnt, flags, last_instruction, pos, 3, token)){
-						solve_label(token, pos, flags);
+						last_label = solve_label(token, pos, flags);
 						cnt--;
 						pos++;
 					};
 				}
 				else {
-					if(!is_argument(token, flags, pos)){
+					if(!is_argument(token, flags, pos, last_label)){
 						cout << "Invalid token: \"" << token << "\"!" << endl;
 					};
 				};
 			};
 		};
 		
-		//cout << "Token: " << token << endl;
-		//cout << "Flags: end: " << flags[0] << ", space: " << flags[1] << ", const: " << flags[2] << ", def: " << flags[3] << ", +: " << flags[4] << ", +arg: " << flags[5] << endl;
+		// cout << "Token: " << token << endl;
+		// cout << "Flags: end: " << flags[0] << ", space: " << flags[1] << ", const: " << flags[2] << ", def: " << flags[3] << ", +: " << flags[4] << ", +arg: " << flags[5] << endl;
 		
 	};
 
