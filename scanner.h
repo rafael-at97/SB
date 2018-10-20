@@ -17,7 +17,7 @@ string upper(string);
 string get_token(ifstream &);
 
 // Check if token is a valid token
-bool valid(string);
+bool valid(string &, short int);
 
 // Check if it is signed
 bool is_signed(string);

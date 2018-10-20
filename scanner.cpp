@@ -64,7 +64,7 @@ string get_token(ifstream &file){
 }
 
 // Check if token is a valid token
-bool valid(string str){
+bool valid(string& str, short int cnt){
 	int x = str.length();
 	if(x > 50)
 		return 0;
@@ -72,8 +72,21 @@ bool valid(string str){
 	int i;
 		
 	for(i=0;i<x;i++){
+		// If begins with number
 		if(!i && isdigit(str[i]))
 			return 0;
+			
+		// Check if last char is a ','
+		if(i == (x-1)){
+			// For COPY, only the first argument receives a ',', so the counter will still be 2
+			if(cnt == 2){
+				if(str[i] == ','){
+					// Accepts ',' as last char, but takes it out
+					str = str.substr(0, x-1);
+					return 1;
+				};
+			};
+		};	
 			
 		if(!(isalpha(str[i]) || isdigit(str[i]) || str[i]=='_'))
 			return 0;

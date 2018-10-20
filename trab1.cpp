@@ -530,7 +530,7 @@ void assemble(ifstream &source){
 			else if(is_label_def(token)){
 				// If is label definition, the checking function already erases the ':'
 	
-				if(valid(token)){
+				if(valid(token, cnt)){
 					// Token is valid
 
 					// Check if there are problems according to flags				
@@ -544,7 +544,7 @@ void assemble(ifstream &source){
 			}
 			else {
 				// Assume it is a label
-				if(valid(token)){
+				if(valid(token, cnt)){
 					// Token is valid
 	
 					// Check most problems
