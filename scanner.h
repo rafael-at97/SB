@@ -19,8 +19,11 @@ string get_token(ifstream &);
 // Check if token is a valid token
 bool valid(string);
 
-// Check if it is a number
-bool is_int(string);
+// Check if it is signed
+bool is_signed(string);
 
-// Convert string to int
-int strtoi(string);
+// Check if string represents a decimal
+bool is_decimal(string);
+
+// Check if string represents a hexadecimal
+bool is_hexadecimal(string);

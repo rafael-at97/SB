@@ -82,40 +82,74 @@ bool valid(string str){
 	return 1;
 }
 
-bool is_int(string str){
-	int x = str.length();
-
-	for(int i=1;i<x;i++){
-		if(!isdigit(str[i]))
-			return 0;
-	};
-	
-	// Special case, user inserted sign
-	if(str[0]=='+' || str[0]=='-'){
-		if(x==1)			  // If length is only one, input has no number
-			return 0;
-	}		
-	else if(!isdigit(str[0])) // Last check, if it is not a digit	
-		return 0;
-	
-	return 1;
+bool is_signed(string str){
+	return (str[0] == '-' || str[0] == '+');
 }
 
-int strtoi(string str){
-	int x = str.length(), base = 1, sum=0;
+bool is_decimal(string str){
+	int length = (int)str.length();
+	int i;
 
-	for(int i=x-1;i>=0;i--){
-		if(!i){
-			if(str[i] == '-'){
-				sum = -sum;
-				break;
-			}
-			else if(str[i] == '+')
-				break;	
+	if(is_signed(str)){
+		// Avoids iterating through the first element
+		
+		// if length is under 2 and is signed no number was found
+		if(length < 2)
+			return 0;
+
+		for(i=1;i<length;i++){
+			if(!isdigit(str[i])){
+				return 0;
+			};
+		};	
+	}
+	else {
+		for(i=0;i<length;i++){
+			if(!isdigit(str[i])){
+				return 0;
+			};
 		};
-		sum += (str[i]-'0')*base;
-		base*=10;
 	};
 	
-	return sum;
+	return 1;	
+}
+
+bool is_hexadecimal(string str){
+	int length = (int)str.length();
+	int i;
+
+	if(is_signed(str)){
+		// Avoids iterating through the first element
+		
+		// if length is under 4 and is signed no number was found (-0X...)
+		if(length < 4)
+			return 0;
+
+		// Did not find "0X" initializing hexadecimal value
+		if(str[1] != '0' && toupper(str[2]) != 'X')
+			return 0;
+
+		for(i=4;i<length;i++){
+			if(!isdigit(str[i])){
+				return 0;
+			};
+		};	
+	}
+	else {
+		// if length is under 3 no number was found (0X...)
+		if(length < 3)
+			return 0;
+
+		// Did not find "0X" initializing hexadecimal value
+		if(str[0] != '0' && toupper(str[1]) != 'X')
+			return 0;
+
+		for(i=3;i<length;i++){
+			if(!isdigit(str[i])){
+				return 0;
+			};
+		};	
+	};
+	
+	return 1;	
 }

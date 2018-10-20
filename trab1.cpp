@@ -37,9 +37,10 @@
  *		V2.0 - Accept directives SPACE and CONST, as well as arguments
  *		V2.1 - Accept/treat negative values for SPACE and CONST
  *		V2.2 - Minor fixes on detecting number: a + or - by itself is not a number!
- *	->  V2.3 - Trying to accept hexadecimal as number!
- *  	V2.4 - Trying to implement possibility of using (+) when calling labels, ex: ADD: N + 5
+ *	    V2.3 - Trying to accept hexadecimal as number!
+ *  ->	V2.4 - Trying to implement possibility of using (+) when calling labels, ex: ADD: N + 5
  *		V2.5 - Need to detect if a ',' is used between COPY instruction
+ *		V2.6 - Cannot use certain instructions involving constants 
  *		V3.0 - Accept directives SECTION
  */
 
@@ -171,12 +172,12 @@ void recursive_definition(string token, int pos){
 }
 
 // Does what need to be done when an instruction is found
-string solve_instruction(string token, bool &flag_end, short int &cnt){
-	token = upper(token);	
+string solve_instruction(string token, bool *flags, short int &cnt){
+	token = upper(token);
 	
 	// If STOP, activate flag end to mean that code has ended
 	if(token == "STOP"){
-		flag_end = 1;
+		flags[0] = 1;
 		cnt = 0;
 	}
 	else if(token == "COPY"){
@@ -194,41 +195,57 @@ string solve_instruction(string token, bool &flag_end, short int &cnt){
 }
 
 // Until now, returns nothing
-void solve_directive(string token, bool &waiting_argument_SPACE, bool &waiting_argument_CONST){
+void solve_directive(string token, bool *flags){
 	// First, make sure token is uppercase
 	token = upper(token);				
 					
 	// Specific cases, SPACE and CONST				
 	if(token == "SPACE"){
 		// Check a flag and tells the assembler it is waiting for an argument
-		waiting_argument_SPACE = 1;
+		flags[1] = 1;
 	}
 	else if(token == "CONST"){
 		// Check a flag and tells the assembler it is waiting for an argument
-		waiting_argument_CONST = 1;
+		flags[2] = 1;
 	};
 }
 
-// Check most flags and solve some problems
-void check_problems(int &cnt, bool &flags, string last_instruction, int &pos, short int type){
+// Check most flags and solve some problems 0: No error, 1: Argument errors, 2: STOP error
+short int check_problems(short int &cnt, bool *flags, string last_instruction, int &pos, short int type, string token){
 
-	// If cnt is different from 0, means that an argument label was expected, print error and reset cnt
-	if(cnt){
-		cout << "Error! Missing arguments for instruction " << last_instruction << "!" << endl;
-		
-		// Reset counter so the next instruction can update the counter accordingly
-		cnt = 0;
+	// If is an instruction but STOP was already found
+	if(type == 0 && flags[0]){
+		cout << "Error! Stop already detected, cannot handle any more instructions!!" << endl;
+		return 2;
 	};
-	if(waiting_argument_SPACE){
+
+	if(flags[1]){
 		// Was expecting an argument for SPACE
-		// If not found, simply puts a 0 in the code and increment memory block
+		// If not found, simply puts a 0 in the code and increment memory position
 		code.push_back(0);
 		pos++;
 		
 		// Reset flag
-		waiting_argument_SPACE = 0;
+		flags[1] = 0;
+		
+		// Waiting for SPACE arguments and not finding any is not an error
+		// return 1;
 	};
-	if(waiting_argument_CONST){
+	
+	// If cnt is different from 0, means that an argument label was expected, print error and reset cnt
+	if(cnt && type!=3){
+		cout << "Error! Missing arguments for instruction " << last_instruction << "!" << endl;
+		
+		// Reset counter so the next instruction can update the counter accordingly
+		cnt = 0;
+		return 1;
+	}
+	else if(!cnt && type == 3){
+		cout << "Error! Too many arguments for instruction " << last_instruction << "!" << endl;
+		return 1;
+	}
+	
+	if(flags[2]){
 		// Was expecting an argument for CONST directive
 		// If not found, print error
 		cout << "Error! Expected argument for \"CONST\" directive!" << endl;
@@ -236,12 +253,188 @@ void check_problems(int &cnt, bool &flags, string last_instruction, int &pos, sh
 		// Does not increment 'pos' because the const was not declared correctly
 		
 		// Reset flag because error was already printed
-		waiting_argument_CONST = 0;
+		flags[2] = 0;
+		return 1;
 	};
+	if(flags[3]){
+		// Was expecting instruction or directives (SPACE and CONST only)
+		
+		// Reset flag
+		flags[3] = 0;
+		
+		if(type!=0 && type!=1){
+			return 1;
+		}
+		else{
+			if(type == 1 && token != "CONST" && token != "SPACE")
+				return 1;
+		};	
+	};
+	if(flags[4]){
+		// Plus sign was expected, not found, simply reset flag
+		flags[4] = 0;
+	};
+	if(flags[5]){
+		// Expecting argument for '+' sign, not found means error
+		cout << "Error! Missing argument for '+' operand!" << endl;
+		
+		// Reset flag
+		flags[5] = 0;
+		return 1;
+	};
+	
+	// No problems found
+	return 0;
 }
 
 // Solve labels definition
-void solve_label_def(string token){
+void solve_label_def(string token, bool *flags, int pos){
+	token = upper(token);
+	
+	// 1: Exists and defined, 2: Exists but not defined, 0: Does not exist
+	short int ver = already_defined(token);
+	
+	// Already defined
+	if(ver == 1){
+		cout << "Error! Redefinition of label!" << endl;
+		return;
+	}
+	else if(!ver){
+		// Already exists, but not defined
+		
+		recursive_definition(token, pos);
+		
+		// CHANGE THE FIRST VALUE TO THE POSITION IN THE CODE
+		symbols[token].first = pos;
+		
+		// Set as defined
+		symbols[token].second = 1;
+	}
+	else {
+		// -1, does not even exist!
+		
+		// CHANGE POSITION TO THE COUNTER IN THE CODE
+		symbols[token] = make_pair(pos, 1);
+	};
+	
+	// Tell assembler it is expecting an instruction or some directives (SPACE and CONST)
+	flags[3] = 1;
+}
+
+// Deals with labels
+void solve_label(string token, int pos, bool *flags){
+	token = upper(token);
+
+	// 1: Exists and defined, 2: Exists but not defined, 0: Does not exist
+	short int ver = already_defined(token); 
+
+	if(ver == 1){
+		// Already exists and defined, simply insert into the code the equivalent memory location
+		code.push_back(symbols[token].first);
+	}
+	else if(!ver){
+		// Isn't defined yet
+		code.push_back(symbols[token].first);
+		symbols[token].first = pos;
+	}
+	else {
+		// First time seeing label
+		code.push_back(-1);
+		symbols[token] = make_pair(pos, 0);
+	};
+	
+	// All labels are relative
+	relatives.push_back(pos);
+	
+	// Set a flag telling that a '+' might come next
+	flags[4] = 1;
+}
+
+// Check if it is a number and if flags are raised
+bool is_argument(string token, bool *flags, int &pos){
+	
+	// First, make sure there are directives waiting for arguments
+	if(flags[1]){
+		// SPACE only deals with decimals
+		if(is_decimal(token)){
+			int value = (int)strtol(token.c_str(), NULL, 10);
+			
+			if(value>0){
+				// Allocates space in the memory
+				code.insert(code.end(), value, 0);
+				pos+=value;
+				
+				// Reset flag
+				flags[1] = 0;
+				return 1;
+			}
+			else {
+				cout << "SPACE can only deal with positive arguments:" << endl;
+				return 0;
+			};
+		}
+		else {
+			cout << "Could not resolve argument for SPACE directive:" << endl;
+			return 0;
+		};
+	}
+	else if(flags[2]){
+		// CONST deals with signed, decimal or hexadecimal
+		if(is_decimal(token)){
+			int value = (int)strtol(token.c_str(), NULL, 10);
+			
+			// Allocates space in the memory
+			code.push_back(value);
+			pos++;
+			
+			// Reset flag
+			flags[2] = 0;
+			return 1;
+		}
+		else if(is_hexadecimal(token)){
+			int value = (int)strtol(token.c_str(), NULL, 16);
+			
+			// Allocates space in the memory
+			code.push_back(value);
+			pos++;
+			
+			// Reset flag
+			flags[2] = 0;
+			return 1;			
+		}
+		else {
+			cout << "Could not resolve argument for SPACE directive:" << endl;
+			return 0;
+		};			
+	}
+	else if(flags[4]){
+		// Expecting a '+' sign
+		if(token == "+"){
+			// Set a flag that tells if a number is found next, it represent an offset for a label
+			flags[5] = 1;
+			
+			// Reset flag
+			flags[4] = 0;
+			
+			return 1;
+		};	
+	}
+	else if(flags[5]){
+		// Expecting a number
+		if(is_decimal(token)){
+			int value = (int)strtol(token.c_str(), NULL, 10);
+			
+			// Inserts into the offset maping structure that the position needs an offset
+			cout << "Offset: " << value << endl;
+			
+			// Reset flag
+			flags[5] = 0;
+			
+			return 1;
+		};
+	}
+	
+	return 0;
 }
 
 // This function creates a sequence of the numerical code that represents the source code
@@ -250,25 +443,26 @@ void assemble(ifstream &source){
 	int pos = 0;
 	
 	// 0 -> flag_end
-	// 1 -> flag_read
-	// 2 -> waiting_argument_SPACE
-	// 3 -> waiting_argument_CONST
-	// 4 ->	waiting_def_arg
+	// 1 -> waiting_argument_SPACE
+	// 2 -> waiting_argument_CONST
+	// 3 ->	waiting_def_arg
+	// 4 -> '+' sign expected for label
+	// 5 -> waiting for argument for '+' sign
 	bool flags[6];
 	
 	// Initialization of flags
 	flags[0] = 0;	// Code was not finished yet
-	flags[1] = 1;  	// Read token
-	flags[2] = 0;	// Not waiting for SPACE argument
-	flags[3] = 0;	// Not waiting for CONST argument
-	flags[4] = 0;	// Not waiting for definiton arguments (instruction or directive SPACE or CONST)
+	flags[1] = 0;	// Not waiting for SPACE argument
+	flags[2] = 0;	// Not waiting for CONST argument
+	flags[3] = 0;	// Not waiting for definiton arguments (instruction or directive SPACE or CONST)
+	flags[4] = 0;	// Does not accept '+' sign
+	flags[5] = 0;	// No argument for '+'
 	
 	short int cnt = 0;	// cnt is only 0, 1 or 2, depends on the instruction
 
 	while(!source.eof()){
-		// Get next token if did not already when checking directives
-		if(flag_read)
-			token = get_token(source);
+		// Get next token
+		token = get_token(source);
 		
 		// If there is a token
 		if(!token.empty()){
@@ -276,91 +470,31 @@ void assemble(ifstream &source){
 			if(is_instruction(token)){
 
 				// Check if there are problems according to flags
-				check_problems(cnt, flags, last_instruction, pos, 0);
-
-				// If a STOP instruction was already found, avoid reading and saving other instructions
-				if(flag_end){
-					cout << "Error! Stop already detected, cannot handle any more instructions!!" << endl;
-				}
-				else {
+				if(check_problems(cnt, flags, last_instruction, pos, 0, token) != 2){
 					// This function knows what to do when an instruction is found
-					last_instruction = solve_instruction(token, flag_end, cnt);
+					last_instruction = solve_instruction(token, flags, cnt);
 					// Increment position of the next memory block
-					pos++;
+					pos++;					
 				};
 			}
 			else if(is_directive(token)){
 			
 				// Check if there are problems according to flags
-				check_problems(cnt, flags, last_instruction, pos, 1);
+				check_problems(cnt, flags, last_instruction, pos, 1, token);
 				
 				// Deals with the directives
-				solve_directive(token, waiting_argument_SPACE, waiting_argument_CONST);
+				solve_directive(token, flags);
 			}
 			else if(is_label_def(token)){
 				// If is label definition, the checking function already erases the ':'
-
-				// Check if there are problems according to flags				
-				check_problems(cnt, flags, last_instruction, pos, 2);
-				
-				solve_label_def(token);
-				
+	
 				if(valid(token)){
 					// Token is valid
-					// If the counter is somewhat different from 0, the directive was not expected
-					if(cnt){
-						cout << "Error! Missing arguments for instruction " << last_instruction << "!" << endl;
-					
-						// Reset counter so the directive can be correctly dealt with
-						cnt = 0;
-					};
-					if(waiting_argument_SPACE){
-						// Was expecting an argument for SPACE
-						// If not found, simply puts a 0 in the code and increment memory block
-						code.push_back(0);
-						pos++;
-					
-						// Reset flag
-						waiting_argument_SPACE = 0;
-					};
-					if(waiting_argument_CONST){
-						// Was expecting an argument for CONST directive
-						// If not found, print error
-						cout << "Error! Expected argument for \"CONST\" directive!" << endl;
-					
-						// Does not increment 'pos' because the const was not declared correctly
-					
-						// Reset flag because error was already printed
-						waiting_argument_CONST = 0;
-					};
-					
-					token = upper(token);
-					
-					short int ver = already_defined(token);
-					
-					// Already defined
-					if(ver == 1){
-						cout << ver << endl;
-						cout << symbols[token].first << endl;
-					}
-					else if(!ver){
-						// Already exists, but not defined
-						
-						recursive_definition(token, pos);
-						
-						// CHANGE THE FIRST VALUE TO THE POSITION IN THE CODE
-						symbols[token].first = pos;
-						
-						// Set as defined
-						symbols[token].second = 1;
-					}
-					else {
-						// -1, does not even exist!
-						
-						// CHANGE POSITION TO THE COUNTER IN THE CODE
-						symbols[token] = make_pair(pos, 1);
-					};
-					
+
+					// Check if there are problems according to flags				
+					check_problems(cnt, flags, last_instruction, pos, 2, token);
+				
+					solve_label_def(token, flags, pos);
 				}
 				else {
 					cout << "Invalid label definition: \"" << token << "\"!" << endl;
@@ -370,41 +504,25 @@ void assemble(ifstream &source){
 				// Assume it is a label
 				if(valid(token)){
 					// Token is valid
-					
-					if(!cnt){
-						// Save last instruction
-						cout << "Error! Too many arguments for instruction " << last_instruction << "!" << endl;
-					}
-					else {
-						token = upper(token);
-					
-						short int ver = already_defined(token); 	
-				
-						if(ver == 1){
-							code.push_back(symbols[token].first);
-						}
-						else if(!ver){
-							code.push_back(symbols[token].first);
-							symbols[token].first = pos;
-						}
-						else {
-							code.push_back(-1);
-							symbols[token] = make_pair(pos, 0);
-						};
-						
-						relatives.push_back(pos);
-						
+	
+					// Check most problems
+					if(!check_problems(cnt, flags, last_instruction, pos, 3, token)){
+						solve_label(token, pos, flags);
 						cnt--;
 						pos++;
 					};
 				}
 				else {
-					cout << "Invalid token: \"" << token << "\"!" << endl;
+					if(!is_argument(token, flags, pos)){
+						cout << "Invalid token: \"" << token << "\"!" << endl;
+					};
 				};
 			};
 		};
-		// Reset some flags
-		flag_read = 1;
+		
+		//cout << "Token: " << token << endl;
+		//cout << "Flags: end: " << flags[0] << ", space: " << flags[1] << ", const: " << flags[2] << ", def: " << flags[3] << ", +: " << flags[4] << ", +arg: " << flags[5] << endl;
+		
 	};
 
 }
