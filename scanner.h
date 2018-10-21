@@ -3,7 +3,8 @@
  */
  
 #include<string>
-#include<fstream> 
+#include<fstream>
+#include<algorithm> 
  
 using namespace std; 
  
@@ -14,7 +15,7 @@ bool is_valid(char);
 string upper(string);
 
 // Get tokens from source file
-string get_token(ifstream &, int &);
+string get_token(ifstream &, int &, bool &);
 
 // Check if token is a valid token
 bool valid(string &, short int);
@@ -27,3 +28,5 @@ bool is_decimal(string &, short int);
 
 // Check if string represents a hexadecimal
 bool is_hexadecimal(string);
+
+string to_string(int);

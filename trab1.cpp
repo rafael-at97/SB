@@ -99,6 +99,9 @@ map<int, int> offsets;
 // vector represents a list of pairs (kind of access (STORE, COPY or JUMP) and number_line)
 map<string, vector<pair<int, int> > > access;
 
+// Table used for pre-processing
+map<string, int> pre_proc;
+
 // Directives table
 set<string> directives;
 
@@ -724,7 +727,7 @@ void check_instruction_errors(){
 					// BSS section does not support jumps
 					cout << "Error on line " << v_it->second << ", cannot operate on label " << it->first << endl;
 				}				
-			}
+			};
 		};
 	};
 }
@@ -733,6 +736,8 @@ void check_instruction_errors(){
 void assemble(ifstream &source){
 	string token, last_instruction="", last_label="";
 	int pos = 0, line_number=1;
+	
+	bool break_line;
 	
 	// 0 -> flag_end
 	// 1 -> waiting_argument_SPACE
@@ -764,23 +769,7 @@ void assemble(ifstream &source){
 
 	while(!source.eof()){
 		// Get next token
-		token = get_token(source, line_number);
-		
-		/*
-		cout << "Token: " << token << " in section: ";
-		if(sections==1){
-			cout << "TEXT" << endl;
-		}
-		else if(sections == 2 || sections == 3){
-			cout << "DATA" << endl;
-		}
-		else if(sections == 4 || sections == 5){
-			cout << "BSS" << endl;
-		}
-		else {
-			cout << "none" << endl;
-		}
-		*/
+		token = get_token(source, line_number, break_line);
 		
 		// If there is a token
 		if(!token.empty()){
@@ -877,6 +866,198 @@ void print_code(){
 
 }
 
+bool EQU_defined(string token){
+	token = upper(token);
+	
+	map<string, int>::iterator m_it;
+	
+	m_it = pre_proc.find(token);
+	
+	if(m_it != pre_proc.end()){
+		return 1;
+	};
+	
+	return 0;
+}
+
+// Write into the pre-processed file and returns its name
+string write_new_file(vector<pair<string, int> > file_sequence, string name){
+	ofstream output_file;
+	
+	// Change name of file to be written
+	name = name.substr(0, name.find('.'));
+	name += ".pre";
+	
+	open_write(output_file, name);
+
+	vector<pair<string, int> >::iterator it;
+	int line = 1;
+	
+	for(it=file_sequence.begin();it!=file_sequence.end();it++){
+		while(it->second != line){
+			write_newl(output_file);
+			line++;
+		};
+		write(output_file, (it->first + " "));
+	};
+	
+	// Close pre-processed file
+	output_file.close();
+
+	return name;
+}
+
+// Does the pre-processing
+string pre_process(ifstream &source, string name){
+	string token, last_label;
+	bool break_line = 0;
+
+	int line_number = 1, line_ignore = 0;
+	bool equates = 1; // Assume there are EQU's
+	bool if_flag = 0;
+	short int order=0;  // Order to EQU operands
+	
+	vector<pair<string, int> > file_sequence;
+	
+	while(!source.eof()){
+		
+		// Get next token
+		token = get_token(source, line_number, break_line);
+
+		// If there is a token
+		if(!token.empty()){
+			// First, check if it still accepts EQU's
+			
+			if(line_number == line_ignore)
+				continue;
+			
+			if(equates == 1){
+				if(order == 0){
+					// First, search for label definition
+					if(is_label_def(token)){
+						// Check if already exists
+						// If does -> error
+						// If not -> Insert into equ table
+						if(!EQU_defined(token)){
+							last_label = token;
+							token = upper(token);						
+							pre_proc.insert(pair<string, int>(token, -1));
+							file_sequence.push_back(pair<string, int>(last_label + ":", line_number));
+						}
+						else {
+							cout << "Error during pre-processing: Redefinition of EQU directive." << endl;
+							return "";
+						};
+						
+						order = 1;
+					}
+					else {
+						// Does not accept any more EQU
+						file_sequence.push_back(pair<string, int>(token, line_number));
+						equates = 0;
+					};
+				}
+				else if(order == 1){
+					// Waiting for EQU
+					if(upper(token) == "EQU"){
+						file_sequence.push_back(pair<string, int>(token, line_number));
+						order = 2;
+					}
+					else {
+						// Not accepting more EQU, erases from EQU table last label
+						
+						// Insert into the thing to be written in the file 'last_label:' and 'token'
+						file_sequence.push_back(pair<string, int>(token, line_number));
+						last_label = upper(last_label);
+						pre_proc.erase(last_label);
+						
+						equates = 0;
+					};
+				}
+				else {
+					// Waiting for number argument
+					if(is_decimal(token, 0)){
+						// Update into table the value of the EQU
+						last_label = upper(last_label);
+						pre_proc[last_label] = (int)strtol(token.c_str(), NULL, 10);
+						// Reset order so accepts more EQU's
+						// Erases from the file_sequence last two entries, meaning the label definition and the 'EQU'
+						file_sequence.pop_back();
+						file_sequence.pop_back();
+						
+						order = 0;
+					}
+					else {
+						// Not accepting more EQU, erases from EQU table last label
+						
+						// Insert into the thing to be written in the file 'last_label:', 'EQU' and 'token'
+						file_sequence.push_back(pair<string, int>(token, line_number));
+						last_label = upper(last_label);
+						pre_proc.erase(last_label);
+						
+						cout << "Wrong argument for EQU directive!" << endl;
+						return "";
+						
+						equates = 0;
+					};
+				};
+			}
+			else {
+				// Not accepting more EQU's, treat IF's
+				if(if_flag == 1){
+					if(EQU_defined(token)){
+						// If exists
+						token = upper(token);
+						int value = pre_proc[token];
+						if(!value){
+							// Ignore next line, write empty lines to maintain counter
+							line_ignore = line_number+1;						
+						};
+					}
+					else {
+						cout << "Could not resolve argument for IF instruction!" << endl;
+						return "";
+					};
+					// Reset flag
+					if_flag = 0;
+				}
+				else {
+					if(is_label_def(token)){
+						// Check redefinition of something that was already used as EQU directive
+						if(EQU_defined(token)){
+							cout << "Label already used as EQU label!" << endl;
+							return "";
+						}
+						else {
+							// Copy the token
+							file_sequence.push_back(pair<string, int>((token+':'), line_number));
+						};
+					}
+					else if(EQU_defined(token)){
+						// Instead of writing 'token' to the file, write the respective value of the label
+						token = upper(token);
+						file_sequence.push_back(pair<string, int>(to_string(pre_proc[token]), line_number));
+					}
+					else if(upper(token) == "IF"){
+						// Deal with IF directive
+						// Set a flag waiting for label
+						if_flag = 1;
+					}
+					else if(upper(token) == "EQU"){
+						cout << "EQU directive outside proper place!" << endl;
+						return "";
+					}
+					else {
+						file_sequence.push_back(pair<string, int>(token, line_number));
+					};
+				};
+			};
+		};
+	};
+	
+	return write_new_file(file_sequence, name);
+}
+
 int main(int argc, char **argv){
 	// Check correct number of arguments, 2 as the first is the program name	
 	if(argc != 2){
@@ -893,6 +1074,16 @@ int main(int argc, char **argv){
 
 	// Fill the instruction table for future queries
 	fill_instruction_and_directives_table();
+
+	// Pre-processing
+	string new_source = pre_process(source, string(argv[1]));
+
+	// Close source file
+	source.close();
+
+	// Associates source now with preprocessed file
+	if(!open_pre(source, new_source))
+		return 0;
 
 	// Function that reads the input file and fills the 'code' and 'relative' vectors, most important function in the code
 	assemble(source);

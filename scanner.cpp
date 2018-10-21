@@ -5,6 +5,7 @@
 #include<string>
 #include<fstream>
 #include<cctype>
+#include<algorithm>
 #include"scanner.h" 
  
 using namespace std; 
@@ -25,9 +26,14 @@ string upper(string str){
 }
 
 // Get tokens from source file
-string get_token(ifstream &file, int &line_number){
+string get_token(ifstream &file, int &line_number, bool &break_line){
 	char c = ' ';
 	string token = "";
+	
+	if(break_line){
+		line_number++;
+		break_line = 0;
+	};
 	
 	// While the char is space or tab or space, keep reading
 	while(is_ignore(c) && !file.eof()){
@@ -51,15 +57,17 @@ string get_token(ifstream &file, int &line_number){
 		token.append(&c);
 		file.get(c);
 		
-		if(c == '\n')
-			line_number++;
+		if(c == '\n'){
+			break_line = 1;
+			break;
+		};
 		
 		// Deals with comments, read until next line
 		if(c==';'){
 			while(c!='\n' && !file.eof()){
 				file.get(c);
 				if(c == '\n')
-					line_number++;
+					break_line = 1;
 			};
 			
 			break;	
@@ -197,4 +205,33 @@ bool is_hexadecimal(string str){
 	};
 	
 	return 1;	
+}
+
+string to_string(int num){
+	string tmp = "";
+	bool positive = 1;
+	int result;
+	
+	if(num<0){
+		positive = 0;
+		num = -num;
+	};
+
+	while(num>0){
+		result = num%10;
+		tmp += (char)(result + '0');
+		num = num/10;
+	};
+	
+	if(tmp == ""){
+		tmp += '0';
+	};
+
+	if(!positive){
+		tmp += '-';
+	};
+
+	reverse(tmp.begin(), tmp.end());
+
+	return tmp;
 }
