@@ -61,10 +61,10 @@ using namespace std;
 map<string, int> instructions;
 
 // Table of symbols
-/*			Example
- *	Name | Value  | Defined | Size | section | is_const
- *    A  |    2   |    0	|   4  |    1	 |    0
- *    B  |    1   |    1 	|   1  |    2	 |    1
+/*					  Example
+ *	| Name | Value  | Defined | Size | section |
+ *  |   A  |    2   |    0	  |   4  |    1	   |
+ *  |   B  |    1   |    1 	  |   1  |    2	   |
  *
  */
 class symbol{
@@ -322,20 +322,46 @@ void solve_directive(string token, bool *flags, short int &sections){
 		// Reset flag
 		flags[6] = 0;
 	};
+		
+	if(flags[3] == 1){
+		// Label definition waiting for SPACE or CONST
+		// Specific cases, SPACE and CONST				
+		if(token == "SPACE"){
+			// Check a flag and tells the assembler it is waiting for an argument
+			flags[1] = 1;
+		}
+		else if(token == "CONST"){
+			// Check a flag and tells the assembler it is waiting for an argument
+			flags[2] = 1;
+		}
+		else {
+			cout << "Error! Can not start label with this directive!" << endl;
+		};
+		
+		// Reset flag
+		flags[3] = 0;
+	};
 					
-	// Specific cases, SPACE and CONST				
-	if(token == "SPACE"){
-		// Check a flag and tells the assembler it is waiting for an argument
-		flags[1] = 1;
-	}
-	else if(token == "CONST"){
-		// Check a flag and tells the assembler it is waiting for an argument
-		flags[2] = 1;
-	}
-	else if(token == "SECTION"){
+	if(token == "SECTION"){
 		// Set a flag telling the assembler it wants TEXT, DATA or BSS
 		flags[6] = 1;
 	};
+}
+
+// Define the labels
+void define_label(string label, int pos, int _size, short int _section){
+	// solve_label_def will make sure the symbols table already contains the label
+	
+	// Update values in the table
+	symbols[label].size = _size;
+	symbols[label].section = _section;
+	
+	if(symbols[label].defined == 0){
+		recursive_definition(label, pos);
+		symbols[label].value = pos;
+		symbols[label].defined = 1;
+	};
+	
 }
 
 // Check most flags and solve some problems 0: No error, 1: Argument errors, 2: STOP error
@@ -351,11 +377,9 @@ short int check_problems(short int &cnt, bool *flags, string last_instruction, i
 		// Was expecting an argument for SPACE
 		// If not found, simply puts a 0 in the code and increment memory position
 		code.push_back(0);
-		pos++;
 		
-		// Insert into the symbols table the size of the label
-		symbols[last_label].size = 1;
-		symbols[last_label].section = 2;	// SPACE is in the BSS section
+		define_label(last_label, pos, 1, 2);
+		pos++;
 		
 		// Reset flag
 		flags[1] = 0;
@@ -391,15 +415,17 @@ short int check_problems(short int &cnt, bool *flags, string last_instruction, i
 	if(flags[3]){
 		// Was expecting instruction or directives (SPACE and CONST only)
 		
-		// Reset flag
-		flags[3] = 0;
-		
 		if(type!=0 && type!=1){
 			return 1;
 		}
 		else{
-			if(type == 1 && token != "CONST" && token != "SPACE")
-				return 1;
+			if(type == 0){
+				// Reset flag only if instruction found
+				flags[3] = 0;
+				
+				// Need to update the symbol table, informing the last label def was a instruction
+				define_label(last_label, pos, 1, 0);
+			};	
 		};
 	};
 	if(flags[4]){
@@ -443,22 +469,13 @@ string solve_label_def(string token, bool *flags, int pos, int line_number){
 	}
 	else if(!ver){
 		// Already exists, but not defined
-		
-		recursive_definition(token, pos);
-		
-		// CHANGE THE FIRST VALUE TO THE POSITION IN THE CODE
-		symbols[token].value = pos;
-		
-		// Set as defined
-		symbols[token].defined = 1;
-		
 		// Tell assembler it is expecting an instruction or some directives (SPACE and CONST)
 		flags[3] = 1;
 	}
 	else {
 		// -1, does not even exist!
 		
-		// CHANGE POSITION TO THE COUNTER IN THE CODE
+		// CHANGE POSITION TO THE COUNTER IN THE CODE, the only values needed here are value and defined
 		symbols.insert(make_pair<string, symbol>(token, symbol(pos, 1, 1, 1)));
 		
 		// Tell assembler it is expecting an instruction or some directives (SPACE and CONST)
@@ -468,8 +485,22 @@ string solve_label_def(string token, bool *flags, int pos, int line_number){
 	return token;
 }
 
+// Returns 0-Type 'R' instructions, 1-'J' instructions and 2-'S' instructions
+int instruction_type(string instruction, short int cnt){
+	if(instruction == "STORE" || instruction == "INPUT" || (instruction == "COPY" && cnt == 1)){
+		// Trying to change element that is CONST
+		// Type 'S' instruction
+		return 2;
+	}
+	else if(instruction.substr(0, 3) == "JMP"){
+		// Jump instruction, type 'J'
+		return 1;
+	}
+	return 0;
+}
+
 // Deals with labels
-string solve_label(string token, int pos, bool *flags){
+string solve_label(string token, int pos, bool *flags, short int cnt, string instruction, int line_number){
 	token = upper(token);
 
 	// 1: Exists and defined, 0: Exists but not defined, -1: Does not exist
@@ -483,11 +514,13 @@ string solve_label(string token, int pos, bool *flags){
 		// Isn't defined yet
 		code.push_back(symbols[token].value);
 		symbols[token].value = pos;
+		symbols[token].access.push_back(pair<int, int>(instruction_type(instruction, cnt), line_number));
 	}
 	else {
 		// First time seeing label
 		code.push_back(-1);
 		symbols.insert(make_pair<string, symbol>(token, symbol(pos, 0, 1, 1)));
+		symbols[token].access.push_back(pair<int, int>(instruction_type(instruction, cnt), line_number));
 	};
 	
 	// All labels are relative
@@ -511,11 +544,9 @@ bool is_argument(string token, bool *flags, int &pos, string last_label, short i
 			if(value>0){
 				// Allocates space in the memory
 				code.insert(code.end(), value, 0);
-				pos+=value;
+				define_label(last_label, pos, value, 2);
 				
-				// Insert size into table
-				symbols[last_label].size = value;
-				symbols[last_label].section = 2; // BSS section
+				pos+=value;
 				
 				// Reset flag
 				flags[1] = 0;
@@ -538,10 +569,8 @@ bool is_argument(string token, bool *flags, int &pos, string last_label, short i
 			
 			// Allocates space in the memory
 			code.push_back(value);
+			define_label(last_label, pos, 1, 1);
 			pos++;
-		
-			symbols[last_label].size = 1;
-			symbols[last_label].section = 1; // DATA section
 		
 			// Reset flag
 			flags[2] = 0;
@@ -667,6 +696,39 @@ bool correct_section(string token, short int sections, short int type){
 	return 1;
 }
 
+void check_instruction_errors(){
+	map<string, symbol >::iterator it;
+	vector<pair<int, int> >::iterator v_it;
+	short int section;
+	
+	for(it=symbols.begin();it!=symbols.end();it++){
+		section = (it->second).section;
+		for(v_it=(it->second).access.begin();v_it!=(it->second).access.end();v_it++){
+			if(section == 0){
+				// Text section label
+				if(v_it->first != 1){
+					// Different from jump
+					cout << "Error on line " << v_it->second << ", cannot operate on label " << it->first << endl;
+				}
+			}
+			else if(section == 1){
+				// Data section label
+				if(v_it->first != 0){
+					// Data labels can only be used as arithmetic operands
+					cout << "Error on line " << v_it->second << ", cannot operate on label " << it->first << endl;
+				}
+			}
+			else {
+				// BSS section label
+				if(v_it->first == 1){
+					// BSS section does not support jumps
+					cout << "Error on line " << v_it->second << ", cannot operate on label " << it->first << endl;
+				}				
+			}
+		};
+	};
+}
+
 // This function creates a sequence of the numerical code that represents the source code
 void assemble(ifstream &source){
 	string token, last_instruction="", last_label="";
@@ -769,7 +831,7 @@ void assemble(ifstream &source){
 					if(correct_section(token, sections, 2)){
 						// Check most problems
 						if(!check_problems(cnt, flags, last_instruction, pos, 3, token, line_number, last_label)){
-							last_label = solve_label(token, pos, flags);
+							last_label = solve_label(token, pos, flags, cnt, last_instruction, line_number);
 							cnt--;
 							pos++;
 						};
@@ -787,6 +849,8 @@ void assemble(ifstream &source){
 		//cout << "Flags: end: " << flags[0] << ", space: " << flags[1] << ", const: " << flags[2] << ", def: " << flags[3] << ", +: " << flags[4] << ", +arg: " << flags[5] << ", section: " << flags[6] << ", section: " << sections << endl;
 		
 	};
+	
+	check_instruction_errors();
 
 }
 
