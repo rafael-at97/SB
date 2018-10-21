@@ -25,7 +25,7 @@ string upper(string str){
 }
 
 // Get tokens from source file
-string get_token(ifstream &file){
+string get_token(ifstream &file, int &line_number){
 	char c = ' ';
 	string token = "";
 	
@@ -33,10 +33,16 @@ string get_token(ifstream &file){
 	while(is_ignore(c) && !file.eof()){
 		file.get(c);
 		
+		if(c == '\n')
+			line_number++;
+		
 		// Deals with comments, read until next line
 		if(c==';'){
-			while(c!='\n' && !file.eof())
-				file.get(c);	
+			while(c!='\n' && !file.eof()){
+				file.get(c);
+				if(c == '\n')
+					line_number++;	
+			};		
 		};
 	}
 	
@@ -45,10 +51,16 @@ string get_token(ifstream &file){
 		token.append(&c);
 		file.get(c);
 		
+		if(c == '\n')
+			line_number++;
+		
 		// Deals with comments, read until next line
 		if(c==';'){
-			while(c!='\n' && !file.eof())
+			while(c!='\n' && !file.eof()){
 				file.get(c);
+				if(c == '\n')
+					line_number++;
+			};
 			
 			break;	
 		}
@@ -80,7 +92,7 @@ bool valid(string& str, short int cnt){
 		if(i == (x-1)){
 			// For COPY, only the first argument receives a ',', so the counter will still be 2
 			if(cnt == 2){
-				if(str[i] == ','){
+				if(str[i] == ',' && x>1){	// x+1 avoids taking ',' alone as valid
 					// Accepts ',' as last char, but takes it out
 					str = str.substr(0, x-1);
 					return 1;
@@ -99,7 +111,7 @@ bool is_signed(string str){
 	return (str[0] == '-' || str[0] == '+');
 }
 
-bool is_decimal(string str){
+bool is_decimal(string& str, short int cnt){
 	int length = (int)str.length();
 	int i;
 
@@ -111,6 +123,16 @@ bool is_decimal(string str){
 			return 0;
 
 		for(i=1;i<length;i++){
+			if(i == length-1){
+				if(cnt){
+					// Accepts ',' as part of int
+					if(str[i] == ',' && length>2){
+						str = str.substr(0, length-1);
+						return 1;
+					};
+				};
+			};
+			
 			if(!isdigit(str[i])){
 				return 0;
 			};
@@ -118,6 +140,16 @@ bool is_decimal(string str){
 	}
 	else {
 		for(i=0;i<length;i++){
+			if(i == length-1){
+				if(cnt){
+					// Accepts ',' as part of int
+					if(str[i] == ',' && length>1){
+						str = str.substr(0, length-1);
+						return 1;
+					};
+				};
+			};
+					
 			if(!isdigit(str[i])){
 				return 0;
 			};

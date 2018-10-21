@@ -14,7 +14,7 @@ bool is_valid(char);
 string upper(string);
 
 // Get tokens from source file
-string get_token(ifstream &);
+string get_token(ifstream &, int &);
 
 // Check if token is a valid token
 bool valid(string &, short int);
@@ -23,7 +23,7 @@ bool valid(string &, short int);
 bool is_signed(string);
 
 // Check if string represents a decimal
-bool is_decimal(string);
+bool is_decimal(string &, short int);
 
 // Check if string represents a hexadecimal
 bool is_hexadecimal(string);

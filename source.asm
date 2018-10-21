@@ -1,10 +1,11 @@
-LOAD N1 ; commaednasdkjketa
-AdD N1 + 2 ; sum n in the value
-N1: SPACE 4
-SUB N1;
-LOAD K
-k: CONST -3
-Add K
-COPY N2, K
+SECTION Text
+	ADD N1 + 0
+SECTION BSS
+N1: SPACE 3
+SECTION DATA
+N2: CONST +5
 
 ; SPACE or CONST alone in a line is a problem, or label
+; Have to take care after there file eof, if the assembler is waiting for something
+; Check the size allocated for a label? Example: N: SPACE 2 but allows ADD N + 3
+; Remember to check all flags after exit main loop
