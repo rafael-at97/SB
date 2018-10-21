@@ -95,10 +95,6 @@ map<string, symbol > symbols;
 // Table that helps deal with offsets
 map<int, int> offsets;
 
-// Map to know if certain labels were accessed in an invalid mode
-// vector represents a list of pairs (kind of access (STORE, COPY or JUMP) and number_line)
-map<string, vector<pair<int, int> > > access;
-
 // Table used for pre-processing
 map<string, int> pre_proc;
 
@@ -133,6 +129,8 @@ void fill_instruction_and_directives_table(){
 	directives.insert("TEXT");
 	directives.insert("DATA");
 	directives.insert("BSS");
+	directives.insert("BEGIN");
+	directives.insert("END");
 }
 
 // Simply check if the token is in the map that contains the instructions
@@ -268,7 +266,7 @@ string solve_instruction(string token, bool *flags, short int &cnt){
 }
 
 // Until now, returns nothing
-void solve_directive(string token, bool *flags, short int &sections){
+void solve_directive(string token, bool *flags, short int &sections, short int &module, string last_label){
 	// First, make sure token is uppercase
 	token = upper(token);				
 					
@@ -337,22 +335,64 @@ void solve_directive(string token, bool *flags, short int &sections){
 			// Check a flag and tells the assembler it is waiting for an argument
 			flags[2] = 1;
 		}
+		else if(token == "BEGIN"){
+			// Begin module, will be solved ahead, just update value of the symbol in the table
+			symbols[last_label].value = 0;
+			symbols[last_label].size = 0;
+			symbols[last_label].section = -1;
+		}
 		else {
 			cout << "Error! Can not start label with this directive!" << endl;
 		};
 		
 		// Reset flag
 		flags[3] = 0;
-	};
+	}
+	else {
+		if(token == "SPACE" || token == "CONST"){
+			cout << "A label is needed to define SPACE or CONST directives!" << endl;
+		};
+	}
 					
 	if(token == "SECTION"){
 		// Set a flag telling the assembler it wants TEXT, DATA or BSS
 		flags[6] = 1;
+	}
+	else if(token == "BEGIN"){
+		// Informing it is a module
+		
+		if(sections!=0){
+			// Comes before SECTION TEXT
+			cout << "Module can not begin here!" << endl;
+		}
+		else {
+			if(module == 0){
+				module = 1;
+			}
+			else {
+				// Begin already detected
+				cout << "Error! BEGIN was already detected!" << endl;
+			};
+		};
+	}
+	else if(token == "END"){
+		if(module == 1){
+			module = 2;
+		}
+		else {
+			// END without BEGIN or END already detected
+			if(module == 0)
+				cout << "Error! Cannot END module without BEGIN first!" << endl;
+			else {
+				// Never expecting to come
+				cout << "Error! END already detected!" << endl;
+			};
+		};		
 	};
 }
 
 // Define the labels
-void define_label(string label, int pos, int _size, short int _section){
+void define_label(string label, int pos, int value, int _size, short int _section){
 	// solve_label_def will make sure the symbols table already contains the label
 	
 	// Update values in the table
@@ -361,7 +401,14 @@ void define_label(string label, int pos, int _size, short int _section){
 	
 	if(symbols[label].defined == 0){
 		recursive_definition(label, pos);
-		symbols[label].value = pos;
+		if(_section){
+			// Means that is a SPACE
+			symbols[label].value = value;
+		}
+		else {
+			// Instruction, value is the position in the code
+			symbols[label].value = pos;
+		};
 		symbols[label].defined = 1;
 	};
 	
@@ -381,7 +428,7 @@ short int check_problems(short int &cnt, bool *flags, string last_instruction, i
 		// If not found, simply puts a 0 in the code and increment memory position
 		code.push_back(0);
 		
-		define_label(last_label, pos, 1, 2);
+		define_label(last_label, pos, 0, 1, 2);
 		pos++;
 		
 		// Reset flag
@@ -427,7 +474,7 @@ short int check_problems(short int &cnt, bool *flags, string last_instruction, i
 				flags[3] = 0;
 				
 				// Need to update the symbol table, informing the last label def was a instruction
-				define_label(last_label, pos, 1, 0);
+				define_label(last_label, pos, 0, 1, 0);
 			};	
 		};
 	};
@@ -499,6 +546,10 @@ int instruction_type(string instruction, short int cnt){
 		// Jump instruction, type 'J'
 		return 1;
 	}
+	else if(instruction == "DIV"){
+		// Verify division by 0
+		return 3;
+	};
 	return 0;
 }
 
@@ -512,6 +563,9 @@ string solve_label(string token, int pos, bool *flags, short int cnt, string ins
 	if(ver == 1){
 		// Already exists and defined, simply insert into the code the equivalent memory location
 		code.push_back(symbols[token].value);
+		
+		// Also inserts into the symbols vector the operation
+		symbols[token].access.push_back(pair<int, int>(instruction_type(instruction, cnt), line_number));
 	}
 	else if(!ver){
 		// Isn't defined yet
@@ -547,7 +601,7 @@ bool is_argument(string token, bool *flags, int &pos, string last_label, short i
 			if(value>0){
 				// Allocates space in the memory
 				code.insert(code.end(), value, 0);
-				define_label(last_label, pos, value, 2);
+				define_label(last_label, pos, 0, value, 2);
 				
 				pos+=value;
 				
@@ -572,7 +626,7 @@ bool is_argument(string token, bool *flags, int &pos, string last_label, short i
 			
 			// Allocates space in the memory
 			code.push_back(value);
-			define_label(last_label, pos, 1, 1);
+			define_label(last_label, pos, value, 1, 1);
 			pos++;
 		
 			// Reset flag
@@ -584,10 +638,8 @@ bool is_argument(string token, bool *flags, int &pos, string last_label, short i
 			
 			// Allocates space in the memory
 			code.push_back(value);
+			define_label(last_label, pos, value, 1, 1);
 			pos++;
-			
-			symbols[last_label].size = 1;
-			symbols[last_label].section = 1; // DATA section
 			
 			// Reset flag
 			flags[2] = 0;
@@ -716,19 +768,79 @@ void check_instruction_errors(){
 			}
 			else if(section == 1){
 				// Data section label
-				if(v_it->first != 0){
+				if(v_it->first == 3) {
+					if((it->second).value == 0){
+						cout << "Error, division by 0 detected!" << endl;
+					};					
+				}
+				else if(v_it->first != 0){
 					// Data labels can only be used as arithmetic operands
 					cout << "Error on line " << v_it->second << ", cannot operate on label " << it->first << endl;
 				}
+			}
+			else if(section == -1){
+				cout << "No operation can be done on label " << it->first << endl;
 			}
 			else {
 				// BSS section label
 				if(v_it->first == 1){
 					// BSS section does not support jumps
 					cout << "Error on line " << v_it->second << ", cannot operate on label " << it->first << endl;
-				}				
+				};
 			};
 		};
+	};
+}
+
+// If after the main loop any flag was still raised, deal with it
+void fix_final_flags(bool *flags, string last_label, int pos, short int cnt, string instruction, short int module){
+	if(cnt){
+		cout << "Error! Missing argument(s) for instruction " << instruction << "!" << endl;
+	};
+	
+	if(module == 1){
+		cout << "Error! Missing END of module!" << endl;
+	};
+	
+	// Possible flags problem:
+	if(!flags[0]){
+		// STOP not found
+		cout << "STOP instruction not detected!" << endl;
+	};
+	if(flags[1]){
+		// Waiting for SPACE argument, not found, insert 0 in the code and update last label
+		// If not found, simply puts a 0 in the code and increment memory position
+		code.push_back(0);
+
+		// Update label		
+		define_label(last_label, pos, 0, 1, 2);
+		
+		// Reset flag
+		flags[1] = 0;
+	};
+	if(flags[2]){
+		// Waiting for CONST argument
+		// If not found, print error
+		cout << "Error! Expected argument for \"CONST\" directive!" << endl;
+		
+		// Reset flag because error was already printed
+		flags[2] = 0;	
+	};
+	if(flags[3]){
+		// Waiting for definition of label
+		cout << "Error! Empty label!" << endl;
+	};
+	if(flags[4]){
+		// If this is an error, a whole bunch of other errors were already printed
+		cout << "Error! TEXT section ending abruptly!" << endl;
+	};
+	if(flags[5]){
+		// Same as above
+		cout << "Error! Expected argument for operand '+'!" << endl;
+	};
+	if(flags[6]){
+		// SECTION without name
+		cout << "Error! Unnamed SECTION!" << endl;
 	};
 }
 
@@ -737,7 +849,9 @@ void assemble(ifstream &source){
 	string token, last_instruction="", last_label="";
 	int pos = 0, line_number=1;
 	
-	bool break_line;
+	short int module = 0; // 0 -> Not module, 1 -> detected BEGIN directive, 2 -> detected END directive
+	
+	bool break_line; // Needed to maitain correct line_number
 	
 	// 0 -> flag_end
 	// 1 -> waiting_argument_SPACE
@@ -773,6 +887,13 @@ void assemble(ifstream &source){
 		
 		// If there is a token
 		if(!token.empty()){
+		
+			// If module already ended
+			if(module==2){
+				cout << "Ignoring, END already detected!" << endl;
+				continue;
+			};
+		
 			// Check if token is a instruction, label definition or none (assume label)
 			if(is_instruction(token)){
 
@@ -794,7 +915,7 @@ void assemble(ifstream &source){
 					check_problems(cnt, flags, last_instruction, pos, 1, token, line_number, last_label);
 				
 					// Deals with the directives
-					solve_directive(token, flags, sections);
+					solve_directive(token, flags, sections, module, last_label);
 				};
 			}
 			else if(is_label_def(token)){
@@ -839,6 +960,7 @@ void assemble(ifstream &source){
 		
 	};
 	
+	fix_final_flags(flags, last_label, pos, cnt, last_instruction, module);
 	check_instruction_errors();
 
 }
