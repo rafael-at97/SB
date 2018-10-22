@@ -13,7 +13,7 @@
  *	   |------------|------------|-----------|------------------------|
  *	   |    ADD	    |     01     |     2     | ACC <- ACC + mem(OP)   |
  *	   |	SUB		|	  02	 |	   2     | ACC <- ACC - mem(OP)	  |
- *	   |	MUL		|	  03	 |	   2     | ACC <- ACC x mem(OP)	  |
+ *	   |	MULT	|	  03	 |	   2     | ACC <- ACC x mem(OP)	  |
  *	   |	DIV		|	  04	 |	   2     | ACC <- ACC / mem(OP)	  |
  *	   |	JMP		|	  05	 |	   2     | PC  <- OP			  |
  *	   |	JMPN	|	  06	 |	   2     | ACC < 0 ? PC <- OP , ; |
@@ -41,8 +41,9 @@
  *  	V2.4 - Trying to implement possibility of using (+) when calling labels, ex: ADD: N + 5
  *		V2.5 - Need to detect if a ',' is used between COPY instruction
  *		V2.6 - Errors are now referenced by line number
- *	->	V3.0 - Accept directives SECTION
- *		V2.7 - Cannot use certain instructions involving constants 
+ *		V3.0 - Accept directives SECTION
+ *		V3.1 - Cannot use certain instructions involving constants
+ *	->	V4.0 - Final 
  */
 
 #include<cstdlib>
@@ -75,31 +76,38 @@ class symbol{
 			this->defined = 0;
 			this->size = 1;
 			this->section = 0;
+			this->type = -1;
 		};
-		symbol(int _value, bool _defined, int _size, short int _section){
+		symbol(int _value, bool _defined, int _size, short int _section, short int _type){
 			// Constructor
 			this->value = _value;
 			this->defined = _defined;
 			this->size = _size;
 			this->section = _section;
+			this->type = _type;
 		};		
 		int value;
 		bool defined;
 		int size;
 		short int section;	// 0->TEXT, 1->DATA, 2->BSS
+		short int type; // -1->Undefined, 0->Local, 1->EXTERN 
 		vector<pair<int, int> > access;
+		vector<int> ext;	// Extern access
 };
 
 map<string, symbol > symbols;
 
 // Table that helps deal with offsets
-map<int, int> offsets;
+map<int, pair<int, int> > offsets;
 
 // Table used for pre-processing
 map<string, int> pre_proc;
 
 // Directives table
 set<string> directives;
+
+// Definitions table (PUBLIC)
+set<string> definitions;
 
 // Vectors to code (opcode and memory spaces) and information on relative positions
 vector<int> code;
@@ -109,7 +117,7 @@ void fill_instruction_and_directives_table(){
 	// Insertion of instructions in the table
 	instructions.insert( pair<string, int>("ADD", 1) );
 	instructions.insert( pair<string, int>("SUB", 2) );
-	instructions.insert( pair<string, int>("MUL", 3) );
+	instructions.insert( pair<string, int>("MULT", 3) );
 	instructions.insert( pair<string, int>("DIV", 4) );
 	instructions.insert( pair<string, int>("JMP", 5) );
 	instructions.insert( pair<string, int>("JMPN", 6) );
@@ -131,6 +139,8 @@ void fill_instruction_and_directives_table(){
 	directives.insert("BSS");
 	directives.insert("BEGIN");
 	directives.insert("END");
+	directives.insert("PUBLIC");
+	directives.insert("EXTERN");
 }
 
 // Simply check if the token is in the map that contains the instructions
@@ -169,7 +179,6 @@ bool is_directive(string token){
 	return 0;	
 }
 
-
 // Access the symbol map and if exists: return 1 -> already defined, 0-> not defined. It it does not exist return -1
 short int already_defined(string token){
 	// Using iterator to avoid using [] operator and inserting new values into the instructions map structure
@@ -188,14 +197,15 @@ short int already_defined(string token){
 }
 
 // Check if a position is in the offsets mapping data structure and returns the value of the offset
-int check_offset(int pos){
-	map<int, int>::iterator it;
+int check_offset(int pos, int &line_number){
+	map<int, pair<int, int> >::iterator it;
 	
 	it = offsets.find(pos);
 	
 	if(it!=offsets.end()){
 		// If a result was found
-		int value = it->second;
+		int value = (it->second).first;
+		line_number = (it->second).second;
 		
 		// Erases from the data structure, given that position was already used
 		offsets.erase(it);
@@ -211,7 +221,7 @@ int check_offset(int pos){
 
 // Does a 'recursive' fill in the code vector of the positions of a previously unknown label
 void recursive_definition(string token, int pos){
-	int _pos, tmp;
+	int _pos, tmp, line_number;
 	
 	// Save the position pointed by the symbols table
 	_pos = symbols[token].value;
@@ -224,7 +234,7 @@ void recursive_definition(string token, int pos){
 		code[_pos] = pos;
 		
 		// Check if it needs offsets
-		int value = check_offset(_pos);
+		int value = check_offset(_pos, line_number);
 		
 		// Check if offset is within size allocated for label
 		if(value < symbols[token].size){
@@ -233,7 +243,7 @@ void recursive_definition(string token, int pos){
 		}
 		else {
 			// Not okay
-			cout << "Error! Segmentation Fault!" << endl;
+			cout << "Error on line " << line_number << ": Segmentation Fault! (Erro semântico)" << endl;
 		};
 		
 		// 'Recursive' update of the position value
@@ -265,8 +275,42 @@ string solve_instruction(string token, bool *flags, short int &cnt){
 	return token;
 }
 
+// Check if public already defined
+bool public_defined(string token){
+	set<string>::iterator it;
+	it = definitions.find(token);
+	
+	if(it!=definitions.end())
+		return 1;
+		
+	return 0;	
+}
+
+// Add extern to symbols table
+void add_extern(string label, int line_number){
+	// Check if it is not a public label
+	if(public_defined(label)){
+		cout << "Error on line " << line_number << ": \"" << label << "\" already defined as PUBLIC! (Erro semântico)" << endl;
+		return;
+	}
+	
+	// The solve_label_def will have already inserted the label into the symbols table, we just need to update it
+	if(symbols[label].type == -1){
+		// A label of this was already seen
+		cout << "Error on line " << line_number << ": Can not use EXTERN variables before definition! (Erro semântico)" << endl;
+	}
+	else {
+		// Update symbols table with value 0, defined, size=-1(Unknow), section = -1 (Can do everything), type = 1
+		symbols[label].value = 0;
+		symbols[label].defined = 1;
+		symbols[label].size = -1;
+		symbols[label].section = -1;
+		symbols[label].type = 1;
+	};
+}
+
 // Until now, returns nothing
-void solve_directive(string token, bool *flags, short int &sections, short int &module, string last_label){
+void solve_directive(string token, bool *flags, short int &sections, short int &module, string last_label, int line_number){
 	// First, make sure token is uppercase
 	token = upper(token);				
 					
@@ -280,12 +324,12 @@ void solve_directive(string token, bool *flags, short int &sections, short int &
 				sections = 1;
 			}
 			else {
-				cout << "Error! Redefinition of SECTION TEXT!" << endl;
+				cout << "Error on line "<< line_number << ": Redefinition of SECTION TEXT! (Erro semântico)" << endl;
 			};
 		}
 		else if(token == "DATA"){
 			if(!sections){
-				cout << "Error! SECTION DATA cannot be defined before SECTION TEXT!" << endl;
+				cout << "Error on line "<< line_number << ": SECTION DATA cannot be defined before SECTION TEXT! (Erro semântico)" << endl;
 			}
 			else if(sections == 1){
 				// DATA after TEXT
@@ -296,12 +340,12 @@ void solve_directive(string token, bool *flags, short int &sections, short int &
 				sections = 3;
 			}
 			else {
-				cout << "Error! Redefinition of SECTION DATA!" << endl;
+				cout << "Error on line "<< line_number << ": Redefinition of SECTION DATA! (Erro semântico)" << endl;
 			};
 		}
 		else if(token == "BSS"){
 			if(!sections){
-				cout << "Error! SECTION BSS cannot be defined before SECTION TEXT!" << endl;
+				cout << "Error on line "<< line_number << ": SECTION BSS cannot be defined before SECTION TEXT! (Erro semântico)" << endl;
 			}
 			else if(sections == 1){
 				// BSS after TEXT
@@ -312,12 +356,12 @@ void solve_directive(string token, bool *flags, short int &sections, short int &
 				sections = 5;
 			}
 			else {
-				cout << "Error! Redefinition of SECTION BSS!" << endl;
+				cout << "Error on line "<< line_number << ": Redefinition of SECTION BSS! (Erro semântico)" << endl;
 			};		
 		}
 		else {
 			// Not what was expected, error!
-			cout << "Could not resolve section name!" << endl;
+			cout << "Error on line "<< line_number << ": Could not resolve section name! (Erro sintático)" << endl;
 		};
 		
 		// Reset flag
@@ -340,9 +384,15 @@ void solve_directive(string token, bool *flags, short int &sections, short int &
 			symbols[last_label].value = 0;
 			symbols[last_label].size = 0;
 			symbols[last_label].section = -1;
+			symbols[last_label].defined = 1;
+			symbols[last_label].type = 0;	// Purely local
+		}
+		else if(token == "EXTERN"){
+			// Extern variable
+			add_extern(last_label, line_number);
 		}
 		else {
-			cout << "Error! Can not start label with this directive!" << endl;
+			cout << "Error on line "<< line_number << ": Can not start label with this directive! (Erro sintático)" << endl;
 		};
 		
 		// Reset flag
@@ -350,7 +400,7 @@ void solve_directive(string token, bool *flags, short int &sections, short int &
 	}
 	else {
 		if(token == "SPACE" || token == "CONST"){
-			cout << "A label is needed to define SPACE or CONST directives!" << endl;
+			cout << "Error on line "<< line_number << ": A label is needed to define SPACE or CONST directives! (Erro sintático)" << endl;
 		};
 	}
 					
@@ -363,7 +413,7 @@ void solve_directive(string token, bool *flags, short int &sections, short int &
 		
 		if(sections!=0){
 			// Comes before SECTION TEXT
-			cout << "Module can not begin here!" << endl;
+			cout << "Error on line "<< line_number << ": Module can not begin here! (Erro semântico)" << endl;
 		}
 		else {
 			if(module == 0){
@@ -371,7 +421,7 @@ void solve_directive(string token, bool *flags, short int &sections, short int &
 			}
 			else {
 				// Begin already detected
-				cout << "Error! BEGIN was already detected!" << endl;
+				cout << "Error on line "<< line_number << ": BEGIN was already detected! (Erro semântico)" << endl;
 			};
 		};
 	}
@@ -382,33 +432,31 @@ void solve_directive(string token, bool *flags, short int &sections, short int &
 		else {
 			// END without BEGIN or END already detected
 			if(module == 0)
-				cout << "Error! Cannot END module without BEGIN first!" << endl;
+				cout << "Error on line "<< line_number << ": Cannot END module without BEGIN first! (Erro semântico)" << endl;
 			else {
 				// Never expecting to come
-				cout << "Error! END already detected!" << endl;
+				cout << "Error on line "<< line_number << ": END already detected! (Erro semântico)" << endl;
 			};
 		};		
+	}
+	else if(token == "PUBLIC"){
+		// Set a flag that tells next label is to be made public
+		flags[7] = 1;
 	};
 }
 
 // Define the labels
-void define_label(string label, int pos, int value, int _size, short int _section){
+void define_label(string label, int pos, int value, int _size, short int _section, short int _type){
 	// solve_label_def will make sure the symbols table already contains the label
 	
 	// Update values in the table
 	symbols[label].size = _size;
 	symbols[label].section = _section;
+	symbols[label].type = _type;
 	
 	if(symbols[label].defined == 0){
 		recursive_definition(label, pos);
-		if(_section){
-			// Means that is a SPACE
-			symbols[label].value = value;
-		}
-		else {
-			// Instruction, value is the position in the code
-			symbols[label].value = pos;
-		};
+		symbols[label].value = pos;
 		symbols[label].defined = 1;
 	};
 	
@@ -419,7 +467,7 @@ short int check_problems(short int &cnt, bool *flags, string last_instruction, i
 
 	// If is an instruction but STOP was already found
 	if(type == 0 && flags[0]){
-		cout << "Error on line "<< line_number << "! Stop already detected, cannot handle any more instructions!!" << endl;
+		cout << "Error on line "<< line_number << ": Stop already detected, cannot handle any more instructions!! (Erro semântico)" << endl;
 		return 2;
 	};
 
@@ -428,7 +476,7 @@ short int check_problems(short int &cnt, bool *flags, string last_instruction, i
 		// If not found, simply puts a 0 in the code and increment memory position
 		code.push_back(0);
 		
-		define_label(last_label, pos, 0, 1, 2);
+		define_label(last_label, pos, 0, 1, 2, 0);
 		pos++;
 		
 		// Reset flag
@@ -440,21 +488,21 @@ short int check_problems(short int &cnt, bool *flags, string last_instruction, i
 	
 	// If cnt is different from 0, means that an argument label was expected, print error and reset cnt
 	if(cnt && type!=3){
-		cout << "Error on line " << line_number << "! Missing arguments for instruction " << last_instruction << "!" << endl;
+		cout << "Error on line " << line_number << ": Missing arguments for instruction " << last_instruction << "! (Erro sintático)" << endl;
 		
 		// Reset counter so the next instruction can update the counter accordingly
 		cnt = 0;
 		return 1;
 	}
-	else if(!cnt && type == 3){
-		cout << "Error on line " << line_number << "! Too many arguments for instruction " << last_instruction << "!" << endl;
+	else if(!cnt && type == 3 && flags[7]!=1){
+		cout << "Error on line " << line_number << ": Too many arguments for instruction " << last_instruction << "! (Erro sintático)" << endl;
 		return 1;
 	}
 	
 	if(flags[2]){
 		// Was expecting an argument for CONST directive
 		// If not found, print error
-		cout << "Error on line " << line_number << "! Expected argument for \"CONST\" directive!" << endl;
+		cout << "Error on line " << line_number << ": Expected argument for \"CONST\" directive! (Erro sintático)" << endl;
 		
 		// Does not increment 'pos' because the const was not declared correctly
 		
@@ -474,7 +522,7 @@ short int check_problems(short int &cnt, bool *flags, string last_instruction, i
 				flags[3] = 0;
 				
 				// Need to update the symbol table, informing the last label def was a instruction
-				define_label(last_label, pos, 0, 1, 0);
+				define_label(last_label, pos, 0, 1, 0, 0);
 			};	
 		};
 	};
@@ -484,7 +532,7 @@ short int check_problems(short int &cnt, bool *flags, string last_instruction, i
 	};
 	if(flags[5]){
 		// Expecting argument for '+' sign, not found means error
-		cout << "Error on line " << line_number << ": Missing argument for '+' operand!" << endl;
+		cout << "Error on line " << line_number << ": Missing argument for '+' operand! (Erro sintático)" << endl;
 		
 		// Reset flag
 		flags[5] = 0;
@@ -493,12 +541,18 @@ short int check_problems(short int &cnt, bool *flags, string last_instruction, i
 	if(flags[6]){
 		// If waiting for directive TEXT, DATA or BSS
 		if(type != 1){
-			cout << "Error on line " << line_number << ": Expecting directive!" << endl;
+			cout << "Error on line " << line_number << ": Expecting directive! (Erro sintático)" << endl;
 		
 			// Reset flag
 			flags[6] = 0;
 		
 			return 1;	// If was expecting but found anything other that a directive, error	
+		};
+	};
+	if(flags[7]){
+		if(type!=3){
+			cout << "Error on line "<< line_number << ": Wrong argument for PUBLIC directive! (Erro sintático)" << endl;
+			return 1;
 		};
 	};
 	
@@ -515,20 +569,20 @@ string solve_label_def(string token, bool *flags, int pos, int line_number){
 	
 	// Already defined
 	if(ver == 1){
-		cout << "Error on line " << line_number << "! Redefinition of label!" << endl;
+		cout << "Error on line " << line_number << "! Redefinition of label! (Erro semântico)" << endl;
 	}
 	else if(!ver){
 		// Already exists, but not defined
-		// Tell assembler it is expecting an instruction or some directives (SPACE and CONST)
+		// Tell assembler it is expecting an instruction or some directives (SPACE and CONST or EXTERN)
 		flags[3] = 1;
 	}
 	else {
 		// -1, does not even exist!
 		
 		// CHANGE POSITION TO THE COUNTER IN THE CODE, the only values needed here are value and defined
-		symbols.insert(make_pair<string, symbol>(token, symbol(pos, 1, 1, 1)));
+		symbols.insert(make_pair<string, symbol>(token, symbol(pos, 1, 1, 1, 0)));
 		
-		// Tell assembler it is expecting an instruction or some directives (SPACE and CONST)
+		// Tell assembler it is expecting an instruction or some directives (SPACE and CONST or EXTERN)
 		flags[3] = 1;
 	};
 	
@@ -564,6 +618,10 @@ string solve_label(string token, int pos, bool *flags, short int cnt, string ins
 		// Already exists and defined, simply insert into the code the equivalent memory location
 		code.push_back(symbols[token].value);
 		
+		// If it is extern, the value 0 will go to the code, need to add into the symbol vector the position being used
+		if(symbols[token].type == 1)
+			symbols[token].ext.push_back(pos);
+		
 		// Also inserts into the symbols vector the operation
 		symbols[token].access.push_back(pair<int, int>(instruction_type(instruction, cnt), line_number));
 	}
@@ -576,7 +634,7 @@ string solve_label(string token, int pos, bool *flags, short int cnt, string ins
 	else {
 		// First time seeing label
 		code.push_back(-1);
-		symbols.insert(make_pair<string, symbol>(token, symbol(pos, 0, 1, 1)));
+		symbols.insert(make_pair<string, symbol>(token, symbol(pos, 0, 1, 1, -1)));
 		symbols[token].access.push_back(pair<int, int>(instruction_type(instruction, cnt), line_number));
 	};
 	
@@ -590,7 +648,7 @@ string solve_label(string token, int pos, bool *flags, short int cnt, string ins
 }
 
 // Check if it is a number and if flags are raised
-bool is_argument(string token, bool *flags, int &pos, string last_label, short int cnt){
+bool is_argument(string token, bool *flags, int &pos, string last_label, short int cnt, int line_number){
 	
 	// First, make sure there are directives waiting for arguments
 	if(flags[1]){
@@ -601,7 +659,7 @@ bool is_argument(string token, bool *flags, int &pos, string last_label, short i
 			if(value>0){
 				// Allocates space in the memory
 				code.insert(code.end(), value, 0);
-				define_label(last_label, pos, 0, value, 2);
+				define_label(last_label, pos, 0, value, 2, 0);
 				
 				pos+=value;
 				
@@ -610,12 +668,12 @@ bool is_argument(string token, bool *flags, int &pos, string last_label, short i
 				return 1;
 			}
 			else {
-				cout << "SPACE can only deal with positive arguments:" << endl;
+				cout << "Error on line "<< line_number << ": SPACE can only deal with positive arguments! (Erro sintático)" << endl;
 				return 0;
 			};
 		}
 		else {
-			cout << "Could not resolve argument for SPACE directive:" << endl;
+			cout << "Error on line "<< line_number << ": Could not resolve argument for SPACE directive! (Erro sintático)" << endl;
 			return 0;
 		};
 	}
@@ -626,7 +684,7 @@ bool is_argument(string token, bool *flags, int &pos, string last_label, short i
 			
 			// Allocates space in the memory
 			code.push_back(value);
-			define_label(last_label, pos, value, 1, 1);
+			define_label(last_label, pos, value, 1, 1, 0);
 			pos++;
 		
 			// Reset flag
@@ -638,7 +696,7 @@ bool is_argument(string token, bool *flags, int &pos, string last_label, short i
 			
 			// Allocates space in the memory
 			code.push_back(value);
-			define_label(last_label, pos, value, 1, 1);
+			define_label(last_label, pos, value, 1, 1, 0);
 			pos++;
 			
 			// Reset flag
@@ -646,7 +704,7 @@ bool is_argument(string token, bool *flags, int &pos, string last_label, short i
 			return 1;			
 		}
 		else {
-			cout << "Could not resolve argument for SPACE directive:" << endl;
+			cout << "Error on line "<< line_number << ": Could not resolve argument for CONST directive! (Erro sintático)" << endl;
 			return 0;
 		};			
 	}
@@ -677,19 +735,19 @@ bool is_argument(string token, bool *flags, int &pos, string last_label, short i
 				// Means that the label was already defined
 				
 				// Check if the offset is within the declared label
-				if(value < symbols[last_label].size){
+				if((value < symbols[last_label].size) || (symbols[last_label].size == -1)){
 					// Okay, simply sum in the code the offset
 					code[pos-1] += value;
 				}
 				else {
-					cout << "Error! Segmentation Fault!" << endl;
+					cout << "Error on line "<< line_number << ": Segmentation Fault! (Erro semântico)" << endl;
 				};
 			}
 			else {
 				// Inserts into the offset maping structure that the position needs an offset
 			
 				// pos-1 because a label increments the position 
-				offsets.insert( pair<int, int>(pos-1, value) );
+				offsets.insert( make_pair<int, pair<int, int> >(pos-1, pair<int, int>(value, line_number)));
 			
 			};
 
@@ -706,16 +764,16 @@ bool is_argument(string token, bool *flags, int &pos, string last_label, short i
 }
 
 // Print errors related to sections
-bool correct_section(string token, short int sections, short int type){
+bool correct_section(string token, short int sections, short int type, int line_number){
 	if(type == 0 || type == 2){
 		if(sections != 1){
 			if(type == 0){
 				// Instruction not on text section
-				cout << "Instruction outside TEXT section!" << endl;
+				cout << "Error on line "<< line_number << ": Instruction outside TEXT section! (Erro semântico)" << endl;
 			}
 			else {
 				// Label not on text section
-				cout << "Using label outside TEXT section!" << endl;			
+				cout << "Error on line "<< line_number << ": Using label outside TEXT section! (Erro semântico)" << endl;			
 			}	
 			return 0;
 		};
@@ -729,7 +787,7 @@ bool correct_section(string token, short int sections, short int type){
 				return 1;
 			}
 			else {
-				cout << "SPACE declaration outside BSS section!" << endl;
+				cout << "Error on line "<< line_number << ": SPACE declaration outside BSS section! (Erro semântico)" << endl;
 				return 0;
 			};
 		}
@@ -739,7 +797,7 @@ bool correct_section(string token, short int sections, short int type){
 				return 1;
 			}
 			else {
-				cout << "CONST declaration outside DATA section!" << endl;
+				cout << "Error on line "<< line_number << ": CONST declaration outside DATA section! (Erro semântico)" << endl;
 				return 0;
 			};
 		}
@@ -751,41 +809,68 @@ bool correct_section(string token, short int sections, short int type){
 	return 1;
 }
 
+void missing_declarations(){
+	map<string, symbol >::iterator it;
+	set<string>::iterator s_it;
+	
+	// First, check for undeclared labels
+	for(it=symbols.begin();it!=symbols.end();it++){
+		if((it->second).defined!=1){
+			cout << "\"" << it->first << "\" was not defined anywhere!" << endl;
+		};
+	};
+	
+	// Now, check for publics without declaration
+	for(s_it=definitions.begin();s_it!=definitions.end();s_it++){
+		it = symbols.find(*s_it);
+		if(it == symbols.end()){
+			cout << "\"" << *s_it << "\" declared public but not defined!" << endl;
+		}
+		else if((it->second).defined!=1){
+			cout << "\"" << *s_it << "\" declared public but not defined!" << endl;
+		};
+	};
+}
+
 void check_instruction_errors(){
 	map<string, symbol >::iterator it;
 	vector<pair<int, int> >::iterator v_it;
 	short int section;
 	
 	for(it=symbols.begin();it!=symbols.end();it++){
+		// Extern symbols can be operands for any kind of instruction
+		if((it->second).type == 1){
+			continue;
+		};
 		section = (it->second).section;
 		for(v_it=(it->second).access.begin();v_it!=(it->second).access.end();v_it++){
 			if(section == 0){
 				// Text section label
 				if(v_it->first != 1){
 					// Different from jump
-					cout << "Error on line " << v_it->second << ", cannot operate on label " << it->first << endl;
+					cout << "Error on line " << v_it->second << ": cannot operate on label " << it->first << " (Erro semântico)" << endl;
 				}
 			}
 			else if(section == 1){
 				// Data section label
 				if(v_it->first == 3) {
 					if((it->second).value == 0){
-						cout << "Error, division by 0 detected!" << endl;
+						cout << "Error on line " << v_it->second << ": division by 0 detected! (Erro sintático)" << endl;
 					};					
 				}
 				else if(v_it->first != 0){
 					// Data labels can only be used as arithmetic operands
-					cout << "Error on line " << v_it->second << ", cannot operate on label " << it->first << endl;
+					cout << "Error on line " << v_it->second << ": cannot operate on label " << it->first << " (Erro semântico)" << endl;
 				}
 			}
 			else if(section == -1){
-				cout << "No operation can be done on label " << it->first << endl;
+				cout << "Error on line " << v_it->second << ": No operation can be done on label " << it->first << " (Erro semântico)" << endl;
 			}
 			else {
 				// BSS section label
 				if(v_it->first == 1){
 					// BSS section does not support jumps
-					cout << "Error on line " << v_it->second << ", cannot operate on label " << it->first << endl;
+					cout << "Error on line " << v_it->second << ": cannot operate on label " << it->first << " (Erro semântico)" << endl;
 				};
 			};
 		};
@@ -793,19 +878,19 @@ void check_instruction_errors(){
 }
 
 // If after the main loop any flag was still raised, deal with it
-void fix_final_flags(bool *flags, string last_label, int pos, short int cnt, string instruction, short int module){
+void fix_final_flags(bool *flags, string last_label, int pos, short int cnt, string instruction, short int module, int line_number){
 	if(cnt){
-		cout << "Error! Missing argument(s) for instruction " << instruction << "!" << endl;
+		cout << "Error on line " << line_number << ": Missing argument(s) for instruction " << instruction << "! (Erro sintático)" << endl;
 	};
 	
 	if(module == 1){
-		cout << "Error! Missing END of module!" << endl;
+		cout << "Error on line " << line_number << ": Missing END of module! (Erro semântico)" << endl;
 	};
 	
 	// Possible flags problem:
 	if(!flags[0]){
 		// STOP not found
-		cout << "STOP instruction not detected!" << endl;
+		cout << "Error on line " << line_number << ": STOP instruction not detected! (Erro semântico)" << endl;
 	};
 	if(flags[1]){
 		// Waiting for SPACE argument, not found, insert 0 in the code and update last label
@@ -813,7 +898,7 @@ void fix_final_flags(bool *flags, string last_label, int pos, short int cnt, str
 		code.push_back(0);
 
 		// Update label		
-		define_label(last_label, pos, 0, 1, 2);
+		define_label(last_label, pos, 0, 1, 2, 0);
 		
 		// Reset flag
 		flags[1] = 0;
@@ -821,37 +906,212 @@ void fix_final_flags(bool *flags, string last_label, int pos, short int cnt, str
 	if(flags[2]){
 		// Waiting for CONST argument
 		// If not found, print error
-		cout << "Error! Expected argument for \"CONST\" directive!" << endl;
+		cout << "Error on line " << line_number << ": Expected argument for \"CONST\" directive! (Erro sintático)" << endl;
 		
 		// Reset flag because error was already printed
 		flags[2] = 0;	
 	};
 	if(flags[3]){
 		// Waiting for definition of label
-		cout << "Error! Empty label!" << endl;
+		cout << "Error on line " << line_number << ": Empty label! (Erro sintático)" << endl;
 	};
 	if(flags[4]){
 		// If this is an error, a whole bunch of other errors were already printed
-		cout << "Error! TEXT section ending abruptly!" << endl;
+		cout << "Error on line " << line_number << ": TEXT section ending abruptly! (Erro semântico)" << endl;
 	};
 	if(flags[5]){
 		// Same as above
-		cout << "Error! Expected argument for operand '+'!" << endl;
+		cout << "Error on line " << line_number << ": Expected argument for operand '+'! (Erro sintático)" << endl;
 	};
 	if(flags[6]){
 		// SECTION without name
-		cout << "Error! Unnamed SECTION!" << endl;
+		cout << "Error on line " << line_number << ": Unnamed SECTION! (Erro sintático)" << endl;
+	};
+}
+
+// Check if a symbol is extern
+bool is_extern(string token){
+	map<string, symbol >::iterator it;
+	
+	it = symbols.find(token);
+	if(it!=symbols.end()){
+		if((it->second).type == 1){
+			return 1;
+		}
+		return 0;
+	}
+	return 0;
+}
+
+
+// Insert into the SET of public labels
+void insert_public(string label, int line_number){
+	// Check into the definition table if it already exists
+	if(public_defined(label)){
+		cout << "Error on line " << line_number << ": \"" << label << "\" already made public! (Erro semântico)" << endl;
+	}
+	else {
+		// Check into the symbols table if it exists and is EXTERN
+		if(is_extern(label)){
+			cout << "Error on line " << line_number << ": \"" << label << "\" already defined as EXTERN! (Erro semântico)" << endl;
+		}
+		else {
+			definitions.insert(label);
+		};
+	};
+}
+
+// Function for debugging
+void print_symbols(){
+	map<string, symbol >::iterator it;
+	vector<pair<int, int> >::iterator v_it;
+	vector<int>::iterator s_it;
+	set<string>::iterator str_it;
+	
+	cout << "Symbols:" << endl;
+	
+	for(it=symbols.begin();it!=symbols.end();it++){
+		cout << "Symbol: " << (it->first) << ", value: " << (it->second).value << ", defined: " << (it->second).defined;
+		cout << ", size: " << (it->second).size << ", section: " << (it->second).section << ", type: " << (it->second).type << endl;
+		cout << "USES: " << endl;
+		for(v_it=(it->second).access.begin();v_it!=(it->second).access.end();v_it++){
+			cout << "Instruction type " << v_it->first << " on line " << v_it->second << endl;
+		};
+		cout << endl;
+		cout << "EXT USES: " << endl;
+		for(s_it=(it->second).ext.begin();s_it!=(it->second).ext.end();s_it++){
+			cout << "Position: " << *s_it << endl;
+		};		
+		cout << endl;
+	}
+	
+	cout << "Publics:" << endl;
+	
+	for(str_it=definitions.begin();str_it!=definitions.end();str_it++){
+		cout << *str_it << endl;
+	};
+	
+}
+
+bool check_module_local(){
+	// Check if public is empty
+	if(!definitions.empty()){
+		return 0;
+	};
+	
+	map<string, symbol>::iterator it;
+	
+	for(it=symbols.begin();it!=symbols.end();it++){
+		if((it->second).type == 1){
+			// Extern detected
+			return 0;
+		};
+	};
+	
+	return 1;
+}
+
+// Actually saves the code into a file
+void save_code_into_file(bool tables, string name){
+	int i;
+	
+	ofstream output_file;
+	
+	// Change name of file to be written
+	name = name.substr(0, name.find('.'));
+	name += ".obj";
+	
+	open_write(output_file, name);
+
+	if(tables == 1){
+		// Save table of uses, definition and relatives
+		map<string, symbol >::iterator it;
+		vector<int>::iterator v_it;
+		set<string>::iterator s_it;
+	
+		// Table os uses
+		write(output_file, "TABLE USE");
+		write_newl(output_file);
+	
+		for(it=symbols.begin();it!=symbols.end();it++){
+			// Extern symbols can be operands for any kind of instruction
+			if((it->second).type == 1){
+				for(v_it=(it->second).ext.begin();v_it!=(it->second).ext.end();v_it++){
+					write(output_file, it->first + " " + to_string(*v_it));
+					write_newl(output_file);
+				};
+			};
+		};
+	
+		write_newl(output_file);
+		
+		// Table of definitions
+		write(output_file, "TABLE DEFINITIONS");
+		write_newl(output_file);
+		
+		for(s_it=definitions.begin();s_it!=definitions.end();s_it++){
+			// Extern symbols can be operands for any kind of instruction
+			write(output_file, *s_it + " " + to_string(symbols[*s_it].value));
+			write_newl(output_file);
+		};		
+		
+		write_newl(output_file);
+		
+		// table of relatives;
+		write(output_file, "RELATIVE");
+		write_newl(output_file);
+		for(i=0;i<(int)relatives.size();i++)
+			if(!i)
+				write(output_file, to_string(relatives[i]));
+			else
+				write(output_file, ' ' + to_string(relatives[i]));	
+		
+		write_newl(output_file);
+		write_newl(output_file);
+		write(output_file, "CODE");
+		write_newl(output_file);
+	};
+
+	// Code per se
+
+	for(i=0;i<(int)code.size();i++)
+		if(!i)
+			write(output_file, to_string(code[i]));
+		else
+			write(output_file, ' ' + to_string(code[i]));	
+		
+	write_newl(output_file);
+
+	// Close pre-processed file
+	output_file.close();
+
+}
+
+// Save the module
+void print_module(short int module, string name){
+	if(module == 0){
+		// There is supposed to be only local variables, check if there are any public or extern
+		if(check_module_local()){
+			save_code_into_file(0, name);
+		}
+		else {
+			cout << "Cannot use EXTERN or PUBLIC directives in a single module! (Erro semântico)" << endl;
+		};
+	}
+	else {
+		// It is a module, not a stand-alone
+		save_code_into_file(1, name);
 	};
 }
 
 // This function creates a sequence of the numerical code that represents the source code
-void assemble(ifstream &source){
+void assemble(ifstream &source, string name){
 	string token, last_instruction="", last_label="";
-	int pos = 0, line_number=1;
+	int pos = 0, line_number=1, last_line=0;
 	
 	short int module = 0; // 0 -> Not module, 1 -> detected BEGIN directive, 2 -> detected END directive
 	
-	bool break_line; // Needed to maitain correct line_number
+	bool break_line = 0; // Needed to maitain correct line_number
 	
 	// 0 -> flag_end
 	// 1 -> waiting_argument_SPACE
@@ -860,7 +1120,8 @@ void assemble(ifstream &source){
 	// 4 -> '+' sign expected for label
 	// 5 -> waiting for argument for '+' sign
 	// 6 -> waiting for directives TEXT, BSS or DATA
-	bool flags[7];
+	// 7 -> Waiting for argument for PUBLIC
+	bool flags[8];
 	
 	// Initialization of flags
 	flags[0] = 0;	// Code was not finished yet
@@ -870,6 +1131,7 @@ void assemble(ifstream &source){
 	flags[4] = 0;	// Does not accept '+' sign
 	flags[5] = 0;	// No argument for '+'
 	flags[6] = 0;   // Not waiting yet
+	flags[7] = 0;
 	
 	// 0 -> None found yet
 	// 1 -> TEXT
@@ -890,7 +1152,7 @@ void assemble(ifstream &source){
 		
 			// If module already ended
 			if(module==2){
-				cout << "Ignoring, END already detected!" << endl;
+				cout << "Error on line " << line_number << ": Ignoring, END already detected! (Erro semântico)" << endl;
 				continue;
 			};
 		
@@ -898,7 +1160,7 @@ void assemble(ifstream &source){
 			if(is_instruction(token)){
 
 				// Check section problems
-				if(correct_section(token, sections, 0)){
+				if(correct_section(token, sections, 0, line_number)){
 					// Check if there are problems according to flags
 					if(check_problems(cnt, flags, last_instruction, pos, 0, token, line_number, last_label) != 2){
 						// This function knows what to do when an instruction is found
@@ -910,12 +1172,12 @@ void assemble(ifstream &source){
 			}
 			else if(is_directive(token)){
 			
-				if(correct_section(token, sections, 1)){
+				if(correct_section(token, sections, 1, line_number)){
 					// Check if there are problems according to flags
 					check_problems(cnt, flags, last_instruction, pos, 1, token, line_number, last_label);
 				
 					// Deals with the directives
-					solve_directive(token, flags, sections, module, last_label);
+					solve_directive(token, flags, sections, module, last_label, line_number);
 				};
 			}
 			else if(is_label_def(token)){
@@ -926,11 +1188,14 @@ void assemble(ifstream &source){
 
 					// Check if there are problems according to flags				
 					check_problems(cnt, flags, last_instruction, pos, 2, token, line_number, last_label);
-				
+	
+					if(last_line == line_number){
+						cout << "Error on line " << line_number << ": Cannot declare more than one label in the same line! (Erro sintático)" << endl;
+					};		
 					last_label = solve_label_def(token, flags, pos, line_number);
 				}
 				else {
-					cout << "Line " << line_number << ": Invalid label definition: \"" << token << "\"!" << endl;
+					cout << "Error on line " << line_number << ": Invalid label definition: \"" << token << "\"! (Erro léxico)" << endl;
 				};
 			}
 			else {
@@ -938,35 +1203,68 @@ void assemble(ifstream &source){
 				if(valid(token, cnt)){
 					// Token is valid
 	
-					if(correct_section(token, sections, 2)){
+					if(correct_section(token, sections, 2, line_number)){
 						// Check most problems
 						if(!check_problems(cnt, flags, last_instruction, pos, 3, token, line_number, last_label)){
-							last_label = solve_label(token, pos, flags, cnt, last_instruction, line_number);
-							cnt--;
-							pos++;
+							if(flags[7] == 1){
+								// No need to solve anything, simply inserts into the public table and dont change anything
+								insert_public(token, line_number);
+								
+								// Reset flag
+								flags[7] = 0;
+							}
+							else {
+								last_label = solve_label(token, pos, flags, cnt, last_instruction, line_number);
+								cnt--;
+								pos++;
+							};
 						};
 					};
 				}
 				else {
-					if(!is_argument(token, flags, pos, last_label, cnt)){
-						cout << "Line " << line_number << ": Invalid token: \"" << token << "\"!" << endl;
+					if(!is_argument(token, flags, pos, last_label, cnt, line_number)){
+						cout << "Error on line " << line_number << ": Invalid token: \"" << token << "\"! (Erro léxico)" << endl;
 					};
 				};
 			};
 		};
-		
+		last_line = line_number;
 		//cout << "Token: " << token << endl;
 		//cout << "Flags: end: " << flags[0] << ", space: " << flags[1] << ", const: " << flags[2] << ", def: " << flags[3] << ", +: " << flags[4] << ", +arg: " << flags[5] << ", section: " << flags[6] << ", section: " << sections << endl;
 		
 	};
 	
-	fix_final_flags(flags, last_label, pos, cnt, last_instruction, module);
+	fix_final_flags(flags, last_label, pos, cnt, last_instruction, module, line_number);
+	missing_declarations();
 	check_instruction_errors();
+	print_module(module, name);
+	//print_symbols();
 
+}
+
+// Check tables of use and definition
+void check_tables(){
+	map<string, symbol >::iterator it;
+	vector<int>::iterator v_it;
+	
+	cout << "TABLE USE" << endl;
+	
+	for(it=symbols.begin();it!=symbols.end();it++){
+		// Extern symbols can be operands for any kind of instruction
+		if((it->second).type == 1){
+			for(v_it=(it->second).ext.begin();v_it!=(it->second).ext.end();v_it++){
+				cout << it->first << " " << *v_it << endl;
+			};
+		};
+	};
+	
+	cout << endl;	
 }
 
 void print_code(){
 	int i;
+	
+	check_tables();
 	
 	cout << "RELATIVE" << endl;
 	for(i=0;i<(int)relatives.size();i++)
@@ -1067,7 +1365,7 @@ string pre_process(ifstream &source, string name){
 							file_sequence.push_back(pair<string, int>(last_label + ":", line_number));
 						}
 						else {
-							cout << "Error during pre-processing: Redefinition of EQU directive." << endl;
+							cout << "Error on line " << line_number << " during pre-processing: Redefinition of EQU directive. (Erro semântico)" << endl;
 							return "";
 						};
 						
@@ -1117,7 +1415,7 @@ string pre_process(ifstream &source, string name){
 						last_label = upper(last_label);
 						pre_proc.erase(last_label);
 						
-						cout << "Wrong argument for EQU directive!" << endl;
+						cout << "Error on line " << line_number << ": Wrong argument for EQU directive! (Erro sintático)" << endl;
 						return "";
 						
 						equates = 0;
@@ -1137,7 +1435,7 @@ string pre_process(ifstream &source, string name){
 						};
 					}
 					else {
-						cout << "Could not resolve argument for IF instruction!" << endl;
+						cout << "Error on line " << line_number << ": Could not resolve argument for IF instruction! (Erro sintático)" << endl;
 						return "";
 					};
 					// Reset flag
@@ -1147,7 +1445,7 @@ string pre_process(ifstream &source, string name){
 					if(is_label_def(token)){
 						// Check redefinition of something that was already used as EQU directive
 						if(EQU_defined(token)){
-							cout << "Label already used as EQU label!" << endl;
+							cout << "Error on line " << line_number << ": Label already used as EQU label! (Erro semântico)" << endl;
 							return "";
 						}
 						else {
@@ -1166,7 +1464,7 @@ string pre_process(ifstream &source, string name){
 						if_flag = 1;
 					}
 					else if(upper(token) == "EQU"){
-						cout << "EQU directive outside proper place!" << endl;
+						cout << "Error on line " << line_number << ": EQU directive outside proper place! (Erro semântico)" << endl;
 						return "";
 					}
 					else {
@@ -1208,10 +1506,13 @@ int main(int argc, char **argv){
 		return 0;
 
 	// Function that reads the input file and fills the 'code' and 'relative' vectors, most important function in the code
-	assemble(source);
+	assemble(source, new_source);
+
+	// Close the pre-processed file	
+	source.close();
 
 	// Print the results as expecified
-	print_code();
+	//print_code();
 		
 	//cout << instructions["ADD"] << endl;
 	return 0;
