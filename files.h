@@ -7,7 +7,7 @@
  
 using namespace std;
 
-bool open_and_check(ifstream &, string);
+bool open_and_check(ifstream &, string, string);
 
 bool open_write(ofstream &, string);
 
